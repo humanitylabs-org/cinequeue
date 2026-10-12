@@ -1,0 +1,9 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.bak*
+# Owner state never enters the repository, image or export.
+data/
+*.lock
+.env
+evidence/

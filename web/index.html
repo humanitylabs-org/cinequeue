@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b0b10" />
+  <title>CineQueue</title>
+  <script>
+    (function () {
+      var path = window.location.pathname;
+      var marker = path.indexOf('/movie/');
+      var dir = marker > -1 ? path.slice(0, marker + 1) : (path.endsWith('/') ? path : path.replace(/[^/]*$/, '/'));
+      document.write('<base href="' + dir + '" />');
+    })();
+  </script>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" href="icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+  <link rel="stylesheet" href="styles.css?v=0.1.0-managed1" />
+  <script src="pwa-install.js?v=20261004-cineq4" data-pwa-name="CineQ"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap topbar-inner">
+      <a class="brand" href="./" aria-label="CineQueue home">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span class="brand-word">CINE<em>QUEUE</em></span>
+      </a>
+      <p id="brandMeta" class="brand-meta">Queue</p>
+
+      <button id="addOpen" class="add-open" type="button" aria-haspopup="dialog" aria-controls="addRequestPanel">
+        <span class="add-open-glyph" aria-hidden="true">+</span> Add
+      </button>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="toolbar" aria-label="Search and sort movies">
+      <div class="search-wrap">
+        <span class="search-icon" aria-hidden="true">⌕</span>
+        <input id="search" type="search" placeholder="Search title, year, genre, director, actor…" autocomplete="off" />
+      </div>
+      <select id="sort" aria-label="Sort movies">
+        <option value="queue-order">Queue order</option>
+        <option value="watched-date" hidden>Recently watched</option>
+        <option value="date-added">Date added</option>
+        <option value="title">Title</option>
+        <option value="year-desc">Year ↓</option>
+        <option value="year-asc">Year ↑</option>
+      </select>
+    </section>
+
+    <section id="genreChips" class="genre-chips" aria-label="Filter by genre"></section>
+
+    <div class="filterbar">
+      <nav class="filters" aria-label="Watch status">
+        <button class="active" data-filter="unwatched" type="button">Unwatched</button>
+        <button data-filter="watched" type="button">Watched</button>
+      </nav>
+      <div class="viewtoggle" role="group" aria-label="Layout">
+        <button type="button" data-view="list" aria-label="List view" aria-pressed="true">
+          <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M2 3.5h12M2 8h12M2 12.5h12"/></svg>
+        </button>
+        <button type="button" data-view="grid" aria-label="Poster view" aria-pressed="false">
+          <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <section id="list" class="list" data-view="list"></section>
+    <section id="detail" class="detail hidden"></section>
+  </main>
+
+  <div id="menuLayer"></div>
+
+  <div id="srStatus" class="sr-only" role="status" aria-live="polite"></div>
+
+  <div id="undoBar" class="undo-bar" role="status" aria-live="polite" hidden>
+    <span id="undoText"></span>
+    <button id="undoButton" class="undo-button" type="button">Undo</button>
+  </div>
+  <div id="addRequestBackdrop" class="add-request-backdrop" hidden></div>
+  <div id="backHint" class="back-hint" role="status" hidden>Press back again to exit</div>
+  <section id="addRequestPanel" class="add-request-panel" role="dialog" aria-modal="true" aria-labelledby="addRequestTitle" hidden>
+    <header class="add-request-head">
+      <div>
+        <p class="add-request-kicker">new CineQueue request</p>
+        <h2 id="addRequestTitle">Add a title</h2>
+      </div>
+      <button id="addRequestClose" class="add-request-close" type="button">Close</button>
+    </header>
+    <form id="addRequestForm" class="add-request-form">
+      <p class="add-request-copy">Request a proper enriched card. I’ll resolve the exact title before adding it.</p>
+      <textarea id="addRequestInput" name="text" rows="4" autocomplete="off" placeholder="Film or series to add…"></textarea>
+      <div class="add-request-actions">
+        <button id="addRequestButton" type="submit">Request add</button>
+      </div>
+      <div id="addRequestStatus" class="add-request-status" role="status" aria-live="polite"></div>
+    </form>
+  </section>
+
+  <template id="rowTemplate">
+    <article class="movie" tabindex="0" role="link" aria-label="">
+      <div class="swipe-bg watch" aria-hidden="true"><span class="swipe-label"><span class="swipe-glyph">✓</span> <span class="swipe-word">Watched</span></span></div>
+      <div class="swipe-bg archive" aria-hidden="true"><span class="swipe-label"><span class="swipe-word">Archive</span> <span class="swipe-glyph">✕</span></span></div>
+      <div class="movie-surface">
+        <div class="thumb"><img alt="" loading="lazy"><b></b></div>
+        <div class="info"><h2></h2><p></p></div>
+        <div class="row-end">
+          <span class="rating-badge" aria-label="Rating"></span>
+          <button class="row-menu" type="button" aria-haspopup="menu" aria-expanded="false">⋯</button>
+        </div>
+      </div>
+    </article>
+  </template>
+
+  <template id="tileTemplate">
+    <article class="tile" tabindex="0" role="link" aria-label="">
+      <img alt="" loading="lazy"><b></b>
+    </article>
+  </template>
+
+  <script src="app.js?v=0.1.0-managed1"></script>
+</body>
+</html>

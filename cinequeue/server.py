@@ -1,0 +1,615 @@
+from __future__ import annotations
+
+import datetime as dt
+import fcntl
+import hashlib
+import json
+import os
+import secrets
+import sys
+import time
+import urllib.error
+import urllib.request
+import uuid
+from contextlib import contextmanager
+from http import HTTPStatus
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import parse_qs, unquote, urlparse, urlsplit
+
+from cinequeue.core import MovieStore, WatchStateConflict, parse_movie_requests
+from cinequeue.watch_providers import WatchProviderError, WatchProviderService, configured_region, region_name
+
+VERSION = "0.1.0"
+ROOT = Path(__file__).resolve().parents[1]
+STATIC = ROOT / "web"
+# Owner state lives in one writable directory: the packaged app mounts ${APP_DATA_DIR}/data at /data.
+DATA_DIR = Path(os.environ.get("CINEQUEUE_DATA") or ROOT / "data")
+DATA = DATA_DIR / "movies.json"
+ADD_REQUESTS = DATA_DIR / "add_requests.json"
+BASE_PATH = os.environ.get("CINEQUEUE_BASE_PATH", "/cinequeue").rstrip("/")
+WATCH_PROVIDERS = WatchProviderService()
+# Optional Wizard Agent Service integration for "find and fill in this film" requests.
+#   disabled (default): requests are saved locally and reported as not sent; titles can still be added directly.
+#   live: admitted exactly like Wizard's own client (session + run) at CINEQUEUE_WIZARD_ORIGIN.
+#   stub / fail: QA-only fakes; never contact an agent.
+ADMIT = os.environ.get("CINEQUEUE_ADMIT", "disabled").strip().lower()
+WIZARD_ORIGIN = os.environ.get("CINEQUEUE_WIZARD_ORIGIN", "").strip().rstrip("/")
+AGENT_NAME = os.environ.get("CINEQUEUE_AGENT_NAME", "").strip()[:40] or "your Wizard"
+ORIGINS = {o.strip().rstrip("/") for o in os.environ.get("CINEQUEUE_ORIGINS", "").split(",") if o.strip()}
+REQUEST_STATUSES = ("queued", "dispatched", "processing", "completed", "blocked", "failed")
+METADATA_FIELDS = {
+    "title": str, "year": (int, type(None)), "poster": str, "letterboxd_url": str, "letterboxd_slug": str,
+    "description": str, "genres": list, "directors": list, "creators": list, "cast": list, "trailer_url": str,
+    "imdb_id": str, "imdb_url": str, "rating": (int, float, type(None)), "rating_count": (int, type(None)),
+    "rating_source": str, "runtime_minutes": (int, type(None)), "media_type": str, "notes": str,
+    "featured_episodes": list, "source": str,
+}
+
+
+class AddRequestDispatchError(RuntimeError):
+    def __init__(self, message: str, record: dict):
+        super().__init__(message)
+        self.record = record
+
+
+def strip_base_path(path: str) -> str:
+    if BASE_PATH and path == BASE_PATH:
+        return "/"
+    if BASE_PATH and path.startswith(f"{BASE_PATH}/"):
+        return path[len(BASE_PATH) :]
+    return path
+
+
+def utc_now() -> str:
+    return dt.datetime.now(dt.timezone.utc).isoformat()
+
+
+def clip(value: object, limit: int) -> str:
+    text = str(value or "").strip()
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+
+def add_request_id(text: str, created_at: str) -> str:
+    digest = hashlib.sha256(f"{created_at}\n{text}".encode("utf-8")).hexdigest()[:10]
+    stamp = reformat_timestamp_for_id(created_at)
+    return f"cinequeue-add-{stamp}-{digest}"
+
+
+def reformat_timestamp_for_id(timestamp: str) -> str:
+    return timestamp.replace("-", "").replace(":", "").replace("+", "z").replace(".", "")[:15].lower()
+
+
+def load_add_requests(path: Path | str = ADD_REQUESTS) -> list[dict]:
+    request_path = Path(path)
+    if not request_path.exists():
+        return []
+    try:
+        data = json.loads(request_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return []
+    return data if isinstance(data, list) else []
+
+
+def save_add_requests(items: list[dict], path: Path | str = ADD_REQUESTS) -> None:
+    request_path = Path(path)
+    request_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = request_path.with_suffix(request_path.suffix + ".tmp")
+    tmp.write_text(json.dumps(items, indent=2, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(request_path)
+
+
+@contextmanager
+def lock_add_requests(path: Path | str = ADD_REQUESTS):
+    request_path = Path(path)
+    request_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = request_path.with_suffix(request_path.suffix + ".lock")
+    with lock_path.open("a+", encoding="utf-8") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def build_cinequeue_add_prompt(text: str) -> str:
+    requested = clip(text, 800)
+    return f"""Add this to the owner's CineQueue: {requested}
+
+Use the CineQueue app's own MCP tools (cinequeue_*) or its documented HTTP API, not app files, the container or the bare quick-add shortcut alone. Resolve exact-title candidates first (Letterboxd or another reliable film source); if multiple years/titles plausibly match, mark the request blocked with the exact choice needed before writing. Once the intended film/series is clear, add it with cinequeue_add and enrich the card with cinequeue_update: poster, Letterboxd URL/slug, IMDb ID/URL, year, description, genres, directors/creators, cast, trailer, runtime when available, and source. When the owner names specific episodes or other viewing priorities, keep the synopsis clean, put the human note in `notes`, and store structured episode entries in `featured_episodes` so the detail view can highlight them. Only set `rating`, `rating_count` and `rating_source: imdb` from IMDb's official `title.ratings.tsv.gz` dataset; never hand-copy or relabel a Letterboxd score. Replace any bare placeholder instead of duplicating it. Verify with cinequeue_get. Record the request lifecycle with cinequeue_request_update: `processing` when work starts, `completed` only after verification, or `blocked`/`failed` with a concise detail when work cannot finish."""
+
+
+def queue_add_request(text: str, *, request_log_path: Path | str = ADD_REQUESTS) -> dict:
+    requested = clip(text, 800)
+    if not requested:
+        raise ValueError("request text is required")
+    created_at = utc_now()
+    record = {
+        "id": add_request_id(requested, created_at),
+        "text": requested,
+        "status": "queued",
+        "created_at": created_at,
+        "updated_at": created_at,
+        "source_app": "CineQueue",
+        "agent": AGENT_NAME,
+        "prompt": build_cinequeue_add_prompt(requested),
+    }
+    with lock_add_requests(request_log_path):
+        items = load_add_requests(request_log_path)
+        items.insert(0, record)
+        save_add_requests(items[:200], request_log_path)
+    return record
+
+
+def update_add_request(
+    request_id: str,
+    status: str | None,
+    *,
+    detail: str = "",
+    request_log_path: Path | str = ADD_REQUESTS,
+    extra: dict | None = None,
+    expected_status: set[str] | None = None,
+) -> dict:
+    with lock_add_requests(request_log_path):
+        items = load_add_requests(request_log_path)
+        for item in items:
+            if item.get("id") != request_id:
+                continue
+            if status is not None and (expected_status is None or item.get("status") in expected_status):
+                item["status"] = clip(status, 40)
+            item["updated_at"] = utc_now()
+            if detail:
+                item["status_detail"] = clip(detail, 800)
+            if extra:
+                item.update(extra)
+            save_add_requests(items, request_log_path)
+            return item
+    raise KeyError(f"request not found: {request_id}")
+
+
+class AdmissionError(RuntimeError):
+    pass
+
+
+def agent_ready(mode: str | None = None) -> bool:
+    mode = mode or ADMIT
+    return mode in {"stub", "fail"} or (mode == "live" and bool(WIZARD_ORIGIN))
+
+
+def _wizard(method: str, path: str, body: dict, headers: dict | None = None, timeout: float = 10) -> dict:
+    request = urllib.request.Request(
+        WIZARD_ORIGIN + path,
+        method=method,
+        data=json.dumps(body).encode("utf-8"),
+        headers={"Content-Type": "application/json", **(headers or {})},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            raw = response.read()
+    except urllib.error.HTTPError as exc:
+        raise AdmissionError(f"Wizard answered HTTP {exc.code} on {path.rsplit('/', 1)[-1]}") from exc
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        raise AdmissionError(f"Wizard could not be reached ({getattr(exc, 'reason', exc)})") from exc
+    try:
+        return json.loads(raw or b"{}")
+    except ValueError:
+        return {}
+
+
+def dispatch_add_request(record: dict, *, mode: str | None = None) -> dict:
+    """Hand one saved request to the Wizard Agent Service (the only sanctioned agent route)."""
+    request_id = str(record.get("id") or "")
+    if not request_id:
+        raise AdmissionError("CineQueue add request has no id")
+    mode = mode or ADMIT
+    session_id = f"wizard_{int(time.time() * 1000)}_{secrets.token_hex(6)}"
+    if mode == "stub":
+        return {"status": "accepted", "session_id": "stub_" + session_id, "run_id": "stub_run", "mode": "stub"}
+    if mode == "fail":
+        raise AdmissionError("Wizard could not be reached (stubbed outage)")
+    if mode != "live" or not WIZARD_ORIGIN:
+        raise AdmissionError("Agent requests are not configured. Your request is saved; add the title directly or enable the optional Agent Service integration.")
+    prompt = f"{record.get('prompt') or build_cinequeue_add_prompt(record.get('text', ''))}\n\nCineQueue request ID: {request_id}"
+    _wizard("POST", "/wizard/hermes/api/sessions", {"source": "wizard-mobile", "id": session_id})
+    run = _wizard(
+        "POST",
+        "/wizard/hermes/v1/runs",
+        {"session_id": session_id, "input": prompt},
+        {"Idempotency-Key": str(uuid.uuid4())},
+        timeout=20,
+    )
+    return {"status": "accepted", "session_id": session_id, "run_id": str(run.get("run_id") or run.get("id") or ""), "mode": "live"}
+
+
+def queue_and_dispatch_add_request(
+    text: str,
+    *,
+    request_log_path: Path | str = ADD_REQUESTS,
+    dispatcher=dispatch_add_request,
+) -> dict:
+    record = queue_add_request(text, request_log_path=request_log_path)
+    return dispatch_saved_request(record, request_log_path=request_log_path, dispatcher=dispatcher)
+
+
+def dispatch_saved_request(
+    record: dict,
+    *,
+    request_log_path: Path | str = ADD_REQUESTS,
+    dispatcher=dispatch_add_request,
+) -> dict:
+    try:
+        response = dispatcher(dict(record))
+    except Exception as exc:
+        status = "not_sent" if not agent_ready() and dispatcher is dispatch_add_request else "dispatch_failed"
+        failed = update_add_request(
+            record["id"],
+            status,
+            detail=str(exc),
+            request_log_path=request_log_path,
+            extra={"dispatch_error": clip(exc, 800)},
+        )
+        raise AddRequestDispatchError(str(exc), failed) from exc
+    return update_add_request(
+        record["id"],
+        "dispatched",
+        request_log_path=request_log_path,
+        extra={"dispatched_at": utc_now(), "dispatch_response": response},
+        expected_status={"queued", "not_sent", "dispatch_failed"},
+    )
+
+
+def retry_add_request(request_id: str, *, request_log_path: Path | str = ADD_REQUESTS, dispatcher=dispatch_add_request) -> dict:
+    record = next((item for item in load_add_requests(request_log_path) if item.get("id") == request_id), None)
+    if record is None:
+        raise KeyError(request_id)
+    if record.get("status") not in {"not_sent", "dispatch_failed"}:
+        return record
+    return dispatch_saved_request(record, request_log_path=request_log_path, dispatcher=dispatcher)
+
+
+def public_config() -> dict:
+    region = configured_region()
+    return {
+        "version": VERSION,
+        "agent": {"ready": agent_ready(), "name": AGENT_NAME, "mode": ADMIT if agent_ready() else "disabled"},
+        "watch": {"enabled": bool(region), "region": region, "region_name": region_name(region) if region else ""},
+    }
+
+
+def health() -> tuple[bool, dict]:
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        probe = DATA_DIR / ".healthz"
+        probe.write_text("ok")
+        probe.unlink()
+        movies = MovieStore(DATA).all()
+        if not isinstance(movies, list):
+            raise ValueError("movie store is not a list")
+        return True, {"ok": True, "version": VERSION, "movies": len(movies)}
+    except Exception as exc:  # health must report, not raise
+        return False, {"ok": False, "version": VERSION, "error": type(exc).__name__}
+
+
+def apply_metadata(movie_id: str, fields: dict) -> dict:
+    """Enrich one card with known metadata fields (agent/MCP path); unknown fields are rejected."""
+    if not isinstance(fields, dict) or not fields:
+        raise ValueError("fields are required")
+    unknown = set(fields) - set(METADATA_FIELDS)
+    if unknown:
+        raise ValueError(f"unknown fields: {', '.join(sorted(unknown))}")
+    for key, value in fields.items():
+        if not isinstance(value, METADATA_FIELDS[key]) or isinstance(value, bool):
+            raise ValueError(f"invalid value for {key}")
+        if isinstance(value, str) and len(value) > 4000:
+            raise ValueError(f"{key} is too long")
+        if isinstance(value, list) and len(value) > 60:
+            raise ValueError(f"{key} has too many items")
+    if "title" in fields and not fields["title"].strip():
+        raise ValueError("title cannot be empty")
+    return MovieStore(DATA).update_metadata(movie_id, fields)
+
+
+def watch_history_feed(limit: int = 100) -> list[dict]:
+    events = []
+    for movie in MovieStore(DATA).all_projected():
+        for event in movie.get("watch_history") or []:
+            events.append({"movie_id": movie.get("id"), "title": movie.get("title"), "year": movie.get("year"),
+                           "event_id": event.get("id"), "watched_on": event.get("watched_on"),
+                           "recorded_at": event.get("recorded_at")})
+    events.sort(key=lambda e: (e.get("watched_on") or "0000-00-00", e.get("recorded_at") or ""), reverse=True)
+    return events[: max(1, min(int(limit), 1000))]
+
+
+class CineQueueHandler(SimpleHTTPRequestHandler):
+    server_version = "CineQueue/0.1"
+
+    @property
+    def store(self) -> MovieStore:
+        return MovieStore(DATA)
+
+    def end_headers(self) -> None:
+        self.send_header("Cache-Control", "no-store")
+        super().end_headers()
+
+    def log_message(self, format: str, *args) -> None:  # noqa: A002 - no request bodies, keys or titles in logs
+        sys.stderr.write("%s %s\n" % (self.command, (self.path or "").split("?", 1)[0][:120]))
+
+    def do_GET(self) -> None:
+        parsed = urlparse(self.path)
+        if BASE_PATH and parsed.path == BASE_PATH:
+            return self._redirect_to_trailing_slash(parsed)
+        clean_path = strip_base_path(parsed.path)
+        if clean_path in ("/healthz", "/api/health"):
+            ok, payload = health()
+            return self._json(payload, HTTPStatus.OK if ok else HTTPStatus.SERVICE_UNAVAILABLE)
+        if clean_path == "/api/config":
+            return self._json(public_config())
+        if clean_path == "/api/history":
+            limit = parse_qs(parsed.query).get("limit", ["100"])[0]
+            return self._json({"history": watch_history_feed(int(limit) if limit.isdigit() else 100)})
+        if clean_path == "/openapi.json":
+            return self._file(ROOT / "openapi.json", "application/json")
+        if clean_path == "/mcp":
+            self.send_response(HTTPStatus.METHOD_NOT_ALLOWED)
+            self.send_header("Allow", "POST")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return None
+        if clean_path == "/api/movies":
+            include_archived = parse_qs(parsed.query).get("include_archived", [""])[0] == "1"
+            movies = self.store.all_projected()
+            if not include_archived:
+                movies = [m for m in movies if not m.get("archived")]
+            return self._json({"movies": movies})
+        if clean_path == "/api/add-requests":
+            return self._json({"requests": load_add_requests(ADD_REQUESTS)})
+        if clean_path == "/api/genres":
+            genres = sorted({genre for movie in self.store.all() for genre in movie.get("genres", [])})
+            return self._json({"genres": genres})
+        if clean_path.startswith("/api/watch-providers/"):
+            movie_id = unquote(clean_path.removeprefix("/api/watch-providers/"))
+            movie = self.store.get_projected(movie_id)
+            if not movie:
+                return self._json({"error": "movie not found"}, HTTPStatus.NOT_FOUND)
+            region = configured_region()
+            if not region:
+                return self._json({"enabled": False, "error": "Where-to-watch lookup is not configured"}, HTTPStatus.SERVICE_UNAVAILABLE)
+            try:
+                return self._json(WATCH_PROVIDERS.lookup(movie, region=region))
+            except WatchProviderError as exc:
+                print(f"watch-provider lookup failed: {type(exc).__name__}", file=sys.stderr)
+                return self._json(
+                    {"error": f"{region_name(region)} availability is temporarily unavailable"},
+                    HTTPStatus.SERVICE_UNAVAILABLE,
+                )
+        if clean_path.startswith("/api/movie/"):
+            movie_id = unquote(clean_path.rsplit("/", 1)[-1])
+            movie = self.store.get_projected(movie_id)
+            if movie:
+                return self._json({"movie": movie})
+            return self._json({"error": "movie not found"}, HTTPStatus.NOT_FOUND)
+        if clean_path in ("/", "") or clean_path.startswith("/movie/"):
+            self.path = "/index.html"
+        elif clean_path != parsed.path:
+            self.path = clean_path
+        return super().do_GET()
+
+    def _write_allowed(self) -> bool:
+        """Reject browser cross-site writes; same-origin views, MCP/API clients and configured origins pass."""
+        if self.headers.get("Sec-Fetch-Site", "") == "cross-site":
+            return False
+        origin = (self.headers.get("Origin") or "").rstrip("/")
+        if not origin:
+            return True
+        if origin in ORIGINS:
+            return True
+        host = self.headers.get("X-Forwarded-Host") or self.headers.get("Host") or ""
+        if urlsplit(origin).netloc == host.split(",")[0].strip():
+            return True
+        return self.headers.get("Sec-Fetch-Site", "") == "same-origin"
+
+    def do_POST(self) -> None:
+        parsed = urlparse(self.path)
+        clean_path = strip_base_path(parsed.path)
+        if not self._write_allowed():
+            return self._json({"error": "origin not allowed"}, HTTPStatus.FORBIDDEN)
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            length = -1
+        if length < 0 or length > 262144:
+            return self._json({"error": "request body too large"}, HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
+        # Browsers (which send Origin) must use JSON so a cross-site "simple" form post cannot write.
+        is_json = self.headers.get("Content-Type", "").split(";")[0].strip().lower() == "application/json"
+        if length and self.headers.get("Origin") and not is_json:
+            return self._json({"error": "application/json required"}, HTTPStatus.UNSUPPORTED_MEDIA_TYPE)
+        try:
+            return self._post(clean_path)
+        except json.JSONDecodeError:
+            return self._json({"error": "invalid JSON"}, HTTPStatus.BAD_REQUEST)
+
+    def _post(self, clean_path: str) -> None:
+        if clean_path == "/mcp":
+            from cinequeue import mcp_api
+
+            status, body = mcp_api.dispatch(self._read_json())
+            if status == 202:
+                self.send_response(HTTPStatus.ACCEPTED)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return None
+            return self._json(body, HTTPStatus(status))
+        if clean_path.startswith("/api/update/"):
+            movie_id = unquote(clean_path.removeprefix("/api/update/"))
+            try:
+                return self._json({"movie": apply_metadata(movie_id, self._read_json().get("fields") or {})})
+            except ValueError as exc:
+                return self._json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+            except KeyError:
+                return self._json({"error": "movie not found"}, HTTPStatus.NOT_FOUND)
+        if clean_path.startswith("/api/add-requests/"):
+            request_id = unquote(clean_path.removeprefix("/api/add-requests/"))
+            payload = self._read_json()
+            status = str(payload.get("status") or "")
+            try:
+                if status == "retry":
+                    record = retry_add_request(request_id, request_log_path=ADD_REQUESTS)
+                elif status in REQUEST_STATUSES:
+                    record = update_add_request(request_id, status, detail=str(payload.get("detail") or ""), request_log_path=ADD_REQUESTS)
+                else:
+                    return self._json({"error": "status must be retry or one of " + ", ".join(REQUEST_STATUSES)}, HTTPStatus.BAD_REQUEST)
+            except KeyError:
+                return self._json({"error": "request not found"}, HTTPStatus.NOT_FOUND)
+            except AddRequestDispatchError as exc:
+                return self._json({"ok": False, "error": str(exc), "request": exc.record}, HTTPStatus.SERVICE_UNAVAILABLE)
+            return self._json({"ok": True, "request": record})
+        if clean_path == "/api/add":
+            payload = self._read_json()
+            text = str(payload.get("text") or payload.get("title") or "")
+            movies = parse_movie_requests(text)
+            added = self.store.add_many(movies)
+            return self._json({"added": added, "count": len(added)})
+        if clean_path == "/api/request-add":
+            payload = self._read_json()
+            text = str(payload.get("text") or payload.get("title") or payload.get("request") or "")
+            try:
+                record = queue_and_dispatch_add_request(text, request_log_path=ADD_REQUESTS)
+            except ValueError as exc:
+                return self._json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
+            except AddRequestDispatchError as exc:
+                return self._json(
+                    {"ok": False, "error": str(exc), "request": exc.record},
+                    HTTPStatus.SERVICE_UNAVAILABLE,
+                )
+            return self._json({"ok": True, "request": record}, HTTPStatus.ACCEPTED)
+        if clean_path.startswith("/api/toggle/"):
+            movie_id = unquote(clean_path.rsplit("/", 1)[-1])
+            try:
+                return self._json({"movie": self.store.toggle_watched(movie_id)})
+            except WatchStateConflict as exc:
+                return self._json({"error": str(exc)}, HTTPStatus.CONFLICT)
+            except KeyError:
+                return self._json({"error": "movie not found"}, HTTPStatus.NOT_FOUND)
+        if clean_path.startswith("/api/watch-again/"):
+            movie_id = unquote(clean_path.removeprefix("/api/watch-again/"))
+            try:
+                return self._json({"movie": self.store.queue_again(movie_id)})
+            except KeyError:
+                return self._json({"error": "movie not found"}, HTTPStatus.NOT_FOUND)
+        if clean_path.startswith("/api/watch-date/"):
+            remainder = clean_path.removeprefix("/api/watch-date/")
+            try:
+                raw_movie_id, raw_event_id = remainder.split("/", 1)
+            except ValueError:
+                return self._json({"error": "watch event not found"}, HTTPStatus.NOT_FOUND)
+            payload = self._read_json()
+            try:
+                movie = self.store.edit_watch_date(
+                    unquote(raw_movie_id),
+                    unquote(raw_event_id),
+                    str(payload.get("watched_on") or ""),
+                )
+                return self._json({"movie": movie})
+            except ValueError as exc:
+                return self._json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+            except KeyError:
+                return self._json({"error": "watch event not found"}, HTTPStatus.NOT_FOUND)
+        if clean_path.startswith("/api/watch-delete/"):
+            remainder = clean_path.removeprefix("/api/watch-delete/")
+            try:
+                raw_movie_id, raw_event_id = remainder.split("/", 1)
+            except ValueError:
+                return self._json({"error": "watch event not found"}, HTTPStatus.NOT_FOUND)
+            payload = self._read_json()
+            try:
+                movie = self.store.delete_watch_event(
+                    unquote(raw_movie_id),
+                    unquote(raw_event_id),
+                    requeue=bool(payload.get("requeue")),
+                )
+                return self._json({"movie": movie})
+            except KeyError:
+                return self._json({"error": "watch event not found"}, HTTPStatus.NOT_FOUND)
+        if clean_path.startswith("/api/watch/"):
+            movie_id = unquote(clean_path.removeprefix("/api/watch/"))
+            payload = self._read_json()
+            try:
+                movie = self.store.mark_watched(movie_id, str(payload.get("watched_on") or "") or None)
+                return self._json({"movie": movie})
+            except ValueError as exc:
+                return self._json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+            except KeyError:
+                return self._json({"error": "movie not found"}, HTTPStatus.NOT_FOUND)
+        if clean_path.startswith("/api/bump/"):
+            movie_id = unquote(clean_path.rsplit("/", 1)[-1])
+            try:
+                return self._json({"movie": self.store.move_to_top(movie_id)})
+            except KeyError:
+                return self._json({"error": "movie not found"}, HTTPStatus.NOT_FOUND)
+        if clean_path.startswith("/api/archive/"):
+            movie_id = unquote(clean_path.rsplit("/", 1)[-1])
+            try:
+                return self._json({"movie": self.store.set_archived(movie_id, True)})
+            except KeyError:
+                return self._json({"error": "movie not found"}, HTTPStatus.NOT_FOUND)
+        if clean_path.startswith("/api/restore/"):
+            movie_id = unquote(clean_path.rsplit("/", 1)[-1])
+            try:
+                return self._json({"movie": self.store.set_archived(movie_id, False)})
+            except KeyError:
+                return self._json({"error": "movie not found"}, HTTPStatus.NOT_FOUND)
+        if clean_path.startswith("/api/delete/"):
+            movie_id = unquote(clean_path.rsplit("/", 1)[-1])
+            self.store.delete(movie_id)
+            return self._json({"ok": True})
+        return self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
+
+    def _redirect_to_trailing_slash(self, parsed) -> None:
+        target = f"{BASE_PATH}/"
+        if parsed.query:
+            target = f"{target}?{parsed.query}"
+        self.send_response(HTTPStatus.MOVED_PERMANENTLY)
+        self.send_header("Location", target)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def _read_json(self) -> dict:
+        if hasattr(self, "_body_cache"):
+            return self._body_cache
+        length = int(self.headers.get("Content-Length") or 0)
+        data = json.loads(self.rfile.read(length).decode("utf-8")) if length else {}
+        self._body_cache = data if isinstance(data, dict) else {}
+        return self._body_cache
+
+    def _file(self, path: Path, content_type: str) -> None:
+        body = path.read_bytes()
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _json(self, data: dict, status: HTTPStatus = HTTPStatus.OK) -> None:
+        body = json.dumps(data, ensure_ascii=False).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+def run(port: int = 8765, host: str = "127.0.0.1") -> None:
+    handler = lambda *args, **kwargs: CineQueueHandler(*args, directory=str(STATIC), **kwargs)
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    MovieStore(DATA)  # a fresh install starts with an empty, working queue
+    server = ThreadingHTTPServer((host, port), handler)
+    public_path = BASE_PATH or "/"
+    print(f"CineQueue running at http://{host}:{port}{public_path}")
+    server.serve_forever()
+
+
+if __name__ == "__main__":
+    run(
+        port=int(os.environ.get("CINEQUEUE_PORT", "8765")),
+        host=os.environ.get("CINEQUEUE_HOST", "127.0.0.1"),
+    )
