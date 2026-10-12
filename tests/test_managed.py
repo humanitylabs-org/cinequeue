@@ -129,6 +129,29 @@ def test_cross_site_browser_writes_are_refused(app):
     assert get(f"{base}/api/movies")[1]["movies"][0]["title"] == "Heat"
 
 
+def test_dns_rebinding_hosts_are_refused_for_reads_and_writes(app, monkeypatch):
+    base, _ = app
+    port = base.rsplit(":", 1)[1]
+    for path in ("/api/movies", "/", "/api/config"):
+        req = Request(f"{base}{path}", headers={"Host": f"evil.example:{port}"})
+        with pytest.raises(HTTPError) as exc:
+            urlopen(req)
+        assert exc.value.code == 421, path
+    status, _ = post(f"{base}/api/add", {"text": "Heat"}, {"Host": f"evil.example:{port}", "Origin": f"http://evil.example:{port}"})
+    assert status == 403
+    status, _ = post(f"{base}/api/add", {"text": "Heat"}, {"Host": "127.0.0.1:9234", "Origin": "http://127.0.0.1:8080"})
+    assert status == 403
+    # The agent at the App Manager's host-published port, and the configured Wizard origin, still work.
+    assert post(f"{base}/mcp", {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, {"Host": "127.0.0.1:9234"})[0] == 200
+    monkeypatch.setattr(server, "ORIGINS", {"https://wizard.example.ts.net"})
+    monkeypatch.setattr(server, "ORIGIN_HOSTS", {"wizard.example.ts.net"})
+    req = Request(f"{base}/api/movies", headers={"Host": "wizard.example.ts.net"})
+    with urlopen(req) as res:
+        assert res.status == 200
+    status, _ = post(f"{base}/api/add", {"text": "Heat"}, {"Host": "wizard.example.ts.net", "Origin": "https://wizard.example.ts.net"})
+    assert status == 200
+
+
 def test_store_writes_hold_an_advisory_lock_file(app):
     base, data = app
     post(f"{base}/api/add", {"text": "Heat"})

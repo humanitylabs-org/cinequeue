@@ -289,5 +289,6 @@ def test_back_stack_never_exits_on_one_press():
 
 
 def test_frontend_urls_are_relative_and_owner_neutral():
-    assert "private.wizard001.com" not in INDEX
-    assert "James" not in APP and "James" not in INDEX
+    import re
+    for text in (APP, INDEX):
+        assert not re.search(r"https?://[a-z0-9.-]+\.(ts\.net|local)\b", text)

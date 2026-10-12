@@ -37,6 +37,7 @@ ADMIT = os.environ.get("CINEQUEUE_ADMIT", "disabled").strip().lower()
 WIZARD_ORIGIN = os.environ.get("CINEQUEUE_WIZARD_ORIGIN", "").strip().rstrip("/")
 AGENT_NAME = os.environ.get("CINEQUEUE_AGENT_NAME", "").strip()[:40] or "your Wizard"
 ORIGINS = {o.strip().rstrip("/") for o in os.environ.get("CINEQUEUE_ORIGINS", "").split(",") if o.strip()}
+ORIGIN_HOSTS = {urlsplit(o).netloc for o in ORIGINS}
 REQUEST_STATUSES = ("queued", "dispatched", "processing", "completed", "blocked", "failed")
 METADATA_FIELDS = {
     "title": str, "year": (int, type(None)), "poster": str, "letterboxd_url": str, "letterboxd_slug": str,
@@ -329,12 +330,16 @@ class CineQueueHandler(SimpleHTTPRequestHandler):
 
     def end_headers(self) -> None:
         self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "same-origin")
         super().end_headers()
 
     def log_message(self, format: str, *args) -> None:  # noqa: A002 - no request bodies, keys or titles in logs
         sys.stderr.write("%s %s\n" % (self.command, (self.path or "").split("?", 1)[0][:120]))
 
     def do_GET(self) -> None:
+        if not self._host_ok()[0]:
+            return self._json({"error": "unknown host; open CineQueue through your Wizard"}, HTTPStatus.MISDIRECTED_REQUEST)
         parsed = urlparse(self.path)
         if BASE_PATH and parsed.path == BASE_PATH:
             return self._redirect_to_trailing_slash(parsed)
@@ -394,19 +399,23 @@ class CineQueueHandler(SimpleHTTPRequestHandler):
             self.path = clean_path
         return super().do_GET()
 
+    def _host_ok(self) -> tuple[bool, bool, str]:
+        """DNS-rebinding guard for reads and writes: Host must be a configured Wizard origin host, or
+        box-local (loopback on any published port, or the container's service name)."""
+        host = (self.headers.get("Host") or "").strip()
+        name = host.split("]")[0] + "]" if host.startswith("[") else host.rsplit(":", 1)[0]
+        local = name.lower() in {"127.0.0.1", "localhost", "[::1]", "cinequeue"}
+        return (host in ORIGIN_HOSTS or local), local, host
+
     def _write_allowed(self) -> bool:
-        """Reject browser cross-site writes; same-origin views, MCP/API clients and configured origins pass."""
+        """Known Host, and a browser Origin that is absent, configured, or this box-local host itself."""
         if self.headers.get("Sec-Fetch-Site", "") == "cross-site":
             return False
+        ok, local, host = self._host_ok()
+        if not ok:
+            return False
         origin = (self.headers.get("Origin") or "").rstrip("/")
-        if not origin:
-            return True
-        if origin in ORIGINS:
-            return True
-        host = self.headers.get("X-Forwarded-Host") or self.headers.get("Host") or ""
-        if urlsplit(origin).netloc == host.split(",")[0].strip():
-            return True
-        return self.headers.get("Sec-Fetch-Site", "") == "same-origin"
+        return not origin or origin in ORIGINS or (local and origin == f"http://{host}")
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)

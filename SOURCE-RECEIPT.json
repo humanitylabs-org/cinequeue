@@ -1,5 +1,5 @@
 {
-  "source_sha": "13e9ddc683b3396b0ced37c6e5e1a5a63d63785a",
+  "source_sha": "f9be9dad37522a29f3f8b291ec6bcfbbc855ddf5",
   "source_dirty": false,
   "files": {
     "Dockerfile": "be855ea75ca2b3ef6d72fcd28ee3eff4bbf8dc8c62585e3c0011ab69ae4b2042",
@@ -16,7 +16,7 @@
     "cinequeue/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "cinequeue/__main__.py": "0dfbfdbf10de96ef8d4c8aae0d4af08b002c3748f9c86b70ee7e79d6cf396c6f",
     "cinequeue/core.py": "b9859e298c44a81378e869d6a2cbe7ab411d047a5085908843e1888a60e4ce34",
-    "cinequeue/server.py": "ee13f766d4aeb14bf449762217381f21ffb21f16f8651c33efb0c88708717d28",
+    "cinequeue/server.py": "a7623d6f0e08feb1d386e268a55acdefe61dbf561951e47eeb1eaa331a06b727",
     "cinequeue/mcp_api.py": "17ed1d5433dfd715ee5e97327c6def18701d32792aab978ca8d6c11738f282aa",
     "cinequeue/watch_providers.py": "38451d6ec55adece254217feb464d5bab8fa56daf812ab9cfbce10ce5f23c424",
     "cinequeue/enrich.py": "5e70af435a05b85b5aae3731bab5c5b28f3325cfac99b26f71080ae01ebf155e",
@@ -29,14 +29,14 @@
     "web/icon.svg": "8440916f1d922991365acb3d5ee64f5f5c971e1936d28fdd03eb4cb651065170",
     "web/icon-512.png": "d1774c5ad225008e8a130a293c219dfff95c27f71e268d52d893dff19d402eaf",
     "web/apple-touch-icon.png": "f2605b13e088710bda9b325978582b31fa7d43aa731a384a45e23c9d8bb5b6ec",
-    "tests/test_add_requests.py": "7f3749af4c86111b971297229f6c421bf3c1996989a5bb79cf81affa97f525f9",
+    "tests/test_add_requests.py": "f194e8587fabd1fdebf28ef206516f3ec256012c25cdfcf750accc6ec6cad4d9",
     "tests/test_archive_api.py": "d53f258fedab50a0b8ba5a50d8f29c9c62e220fe5e5f85cffa1a96b7b5835bf5",
     "tests/test_base_path_redirect.py": "63f2b084ccbbb1ef416922ecb5ce22123feab8fae69fdb69ace88d801b42ab72",
     "tests/test_core.py": "a212981653cca43f490f9bdf24f67c4fd1141680819f4f7708b85147aaa1fe91",
     "tests/test_enrich.py": "f2c2abab1ab5caeea83c32267acf5dd0adc4f6b0c77b98a32e8d464512aee346",
-    "tests/test_frontend.py": "732771a7fcb0e61f8da6feab1cb4b77b2a2cb7d5c083d67ee052ec5ef2ab3be0",
+    "tests/test_frontend.py": "69eae96a00923136e522c335a8c7e6232b6879371f9b312e9dc4025a1420fd77",
     "tests/test_imdb_ratings.py": "665f51b8f83b6ba181234570daa82dae82dc76ec55f68ff3d0e21e7e3df3c0de",
-    "tests/test_managed.py": "e1ff9a84582ae74cbbfc903a0c233d196036cb8b6bb8d72d7f946c7951a746c5",
+    "tests/test_managed.py": "99a8c3abaa046b9e9caf84cfe7d7fc6eff49945acfd53ff82963f165b3f3858e",
     "tests/test_promotion_blockers.py": "f5fff3e433f94b46da75bdfdb224082b2a47f0150943b19bdcd70412cf37ef37",
     "tests/test_watch_history.py": "878b032104338482b4fe685d1a4e06ff14e0eed2bf689a8d5c364f9748d8db5c",
     "tests/test_watch_providers.py": "94bcae071dd08b811dfd5506dc89288f825dbb2c8524f518003c9c3b74cd6ca4",
@@ -44,5 +44,5 @@
     "tests/test_browser_watch_history.py": "6519004939545d99cf5e2e2dc7c93de4999f0d13b34b5a56b2e500ceac680661",
     "qa/browser_managed.cjs": "db0f4943d3aea6246e55f4f4917d659141756488159eeafa56fc496a605b6665"
   },
-  "tree_sha256": "35931bfcd60c76d070499a83cc22ea421ed3279cd46eeb760306c3ff5df637dd"
+  "tree_sha256": "44d275686c312f5ff11ff9a0da4b13a5290d4dd429fbd723875a9f0a2eb8b9c2"
 }

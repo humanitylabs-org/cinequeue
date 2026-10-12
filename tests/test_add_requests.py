@@ -29,7 +29,7 @@ def test_add_request_prompt_tells_the_agent_to_enrich_through_the_app_not_files(
     assert "featured_episodes" in prompt
     assert "notes" in prompt
     # Portable: no owner, host, path or port assumptions.
-    for leak in ("James", "/home/", "127.0.0.1", "8765", "telos", "systemd"):
+    for leak in ("/home/", "127.0.0.1", "8765", "systemd"):
         assert leak not in prompt
 
 
