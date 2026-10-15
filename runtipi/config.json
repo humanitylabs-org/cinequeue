@@ -11,7 +11,7 @@
     "media"
   ],
   "tipi_version": 1,
-  "version": "0.2.0",
+  "version": "0.2.1",
   "source": "https://github.com/humanitylabs-org/cinequeue",
   "exposable": false,
   "supported_architectures": [

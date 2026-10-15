@@ -1,6 +1,6 @@
 services:
   cinequeue:
-    image: ghcr.io/humanitylabs-org/cinequeue:0.2.0
+    image: ghcr.io/humanitylabs-org/cinequeue:0.2.1
     cap_drop: [ALL]
     cap_add: [CHOWN, SETUID, SETGID]
     security_opt: ['no-new-privileges:true']
