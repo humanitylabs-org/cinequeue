@@ -1,10 +1,10 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-app="cinequeue">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#0b0b10" />
-  <title>CineQueue</title>
+  <title>Movies</title>
   <script>
     (function () {
       var path = window.location.pathname;
@@ -16,15 +16,17 @@
   <link rel="manifest" href="manifest.json" />
   <link rel="icon" href="icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="apple-touch-icon.png" />
-  <link rel="stylesheet" href="styles.css?v=0.1.0-managed1" />
-  <script src="pwa-install.js?v=20261004-cineq4" data-pwa-name="CineQ"></script>
+  <link rel="stylesheet" href="styles.css?v=0.2.0-release1" />
+  <link rel="stylesheet" href="movies-skin.css?v=0.2.0" />
+  <script src="boot.js"></script>
+  <script src="/wizard-os-home/core/app-client.js"></script>
 </head>
 <body>
   <header class="topbar">
     <div class="wrap topbar-inner">
-      <a class="brand" href="./" aria-label="CineQueue home">
+      <a class="brand" href="./" aria-label="Movies home">
         <span class="brand-mark" aria-hidden="true"></span>
-        <span class="brand-word">CINE<em>QUEUE</em></span>
+        <span class="brand-word">MOVIES</span>
       </a>
       <p id="brandMeta" class="brand-meta">Queue</p>
 
@@ -67,6 +69,7 @@
       </div>
     </div>
 
+    <section id="requestProgress" aria-label="Add requests" aria-live="polite"></section>
     <section id="list" class="list" data-view="list"></section>
     <section id="detail" class="detail hidden"></section>
   </main>
@@ -80,11 +83,11 @@
     <button id="undoButton" class="undo-button" type="button">Undo</button>
   </div>
   <div id="addRequestBackdrop" class="add-request-backdrop" hidden></div>
-  <div id="backHint" class="back-hint" role="status" hidden>Press back again to exit</div>
+
   <section id="addRequestPanel" class="add-request-panel" role="dialog" aria-modal="true" aria-labelledby="addRequestTitle" hidden>
     <header class="add-request-head">
       <div>
-        <p class="add-request-kicker">new CineQueue request</p>
+        <p class="add-request-kicker">new Movies request</p>
         <h2 id="addRequestTitle">Add a title</h2>
       </div>
       <button id="addRequestClose" class="add-request-close" type="button">Close</button>
@@ -93,6 +96,7 @@
       <p class="add-request-copy">Request a proper enriched card. I’ll resolve the exact title before adding it.</p>
       <textarea id="addRequestInput" name="text" rows="4" autocomplete="off" placeholder="Film or series to add…"></textarea>
       <div class="add-request-actions">
+        <button id="discardDraft" type="button">Discard draft</button>
         <button id="addRequestButton" type="submit">Request add</button>
       </div>
       <div id="addRequestStatus" class="add-request-status" role="status" aria-live="polite"></div>
@@ -120,6 +124,6 @@
     </article>
   </template>
 
-  <script src="app.js?v=0.1.0-managed1"></script>
+  <script src="app.js?v=0.2.0-release1"></script>
 </body>
 </html>

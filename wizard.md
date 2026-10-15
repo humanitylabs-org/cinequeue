@@ -1,10 +1,10 @@
 ---
 wizard: 0.2
 id: cinequeue
-name: CineQueue
+name: Movies
 type: service
 category: app
-version: 0.1.0
+version: 0.2.0
 summary: Private movie and series watch queue with watch history, notes, documented API and MCP.
 license: LicenseRef-Proprietary
 source: .
@@ -36,11 +36,11 @@ needs: []
 health: /healthz
 ---
 
-# CineQueue
+# Movies
 
 A private watch queue for films and series. Add titles, reorder or bump them, open a detail card,
 mark them watched (history keeps every watch and its date), and queue a rewatch. A new install
-starts with an empty queue that works straight away; nothing about any owner ships with the app.
+starts with exactly one public example, Batman Begins (2005); nothing about any owner ships with the app.
 Your queue, history, notes and request log live in the app's own data folder and survive updates
 and reinstalls.
 

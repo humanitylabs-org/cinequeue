@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Faithful mobile-touch regression QA for CineQueue swipe triage.
+"""Faithful mobile-touch regression QA for Movies swipe triage.
 
 Uses Chromium CDP Input.dispatchTouchEvent against a temporary data copy. This
 exercises browser touch-action arbitration and implicit capture; direct
@@ -35,7 +35,7 @@ def wait_server():
             return
         except Exception:
             time.sleep(0.1)
-    raise RuntimeError("temporary CineQueue server did not start")
+    raise RuntimeError("temporary Movies server did not start")
 
 
 def touch_drag(page, cdp, dx, dy, steps=12, step_ms=30):

@@ -32,7 +32,7 @@ def wait_server():
             return
         except Exception:
             time.sleep(0.1)
-    raise RuntimeError("temporary CineQueue history server did not start")
+    raise RuntimeError("temporary Movies history server did not start")
 
 
 def test_watch_history_mobile_lifecycle():

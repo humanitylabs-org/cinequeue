@@ -7,7 +7,7 @@ CSS = (ROOT / "web" / "styles.css").read_text()
 
 
 def test_home_chrome_is_minimal_and_named_cinequeue():
-    assert "CineQueue" in INDEX
+    assert "Movies" in INDEX
     assert "Cinecue" not in INDEX
     assert "Fast scan watchlist" not in INDEX
     assert "compact tailnet watchlist" not in INDEX
@@ -220,13 +220,13 @@ def test_home_has_agent_add_request_composer_with_direct_add_fallback():
     assert 'id="addRequestForm"' in INDEX
     assert 'id="addRequestInput"' in INDEX
     assert 'id="addRequestButton"' in INDEX
-    assert "new CineQueue request" in APP
+    assert "new Movies request" in APP
     assert "/api/request-add" in APP
     assert "/api/add'" in APP and "agentReady()" in APP
     assert "openAddRequestPanel" in APP
     assert "closeAddRequestPanel" in APP
-    assert "Saved in CineQueue requests" in APP
-    assert "could not start" in APP and "Archimedes" not in APP
+    assert "Sent to your Wizard" in APP
+    assert "Could not confirm your request" in APP and "Archimedes" not in APP
     assert "'.add-request'" not in APP
     assert ".add-request-panel" in CSS
     assert ".add-request-status.ok" in CSS
@@ -282,9 +282,9 @@ def test_runtime_rating_aria_label_is_dynamic():
 
 
 def test_back_stack_never_exits_on_one_press():
-    assert "root-floor" in APP
-    assert "Press back again to exit" in APP and 'id="backHint"' in INDEX
-    assert "exitArmedUntil" in APP
+    assert "root-floor" not in APP
+    assert "WizardApp?.back.useHistory" in APP
+    assert "exitArmedUntil" not in APP
     assert "history.pushState(null" not in APP
 
 

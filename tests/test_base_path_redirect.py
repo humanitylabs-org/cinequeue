@@ -47,7 +47,7 @@ def test_slashless_base_path_redirects_to_trailing_slash(monkeypatch, tmp_path):
         # Trailing-slash home serves the app.
         with opener.open(f"http://127.0.0.1:{port}/cinequeue-kimi/") as res:
             assert res.status == 200
-            assert b"CineQueue" in res.read()
+            assert b"Movies" in res.read()
 
         # API works under the prefix.
         with opener.open(f"http://127.0.0.1:{port}/cinequeue-kimi/api/movies") as res:
@@ -61,7 +61,7 @@ def test_slashless_base_path_redirects_to_trailing_slash(monkeypatch, tmp_path):
         # Deep link serves the SPA shell.
         with opener.open(f"http://127.0.0.1:{port}/cinequeue-kimi/movie/some-id") as res:
             assert res.status == 200
-            assert b"CineQueue" in res.read()
+            assert b"Movies" in res.read()
     finally:
         httpd.shutdown()
         httpd.server_close()

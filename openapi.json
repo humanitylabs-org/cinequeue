@@ -1,8 +1,8 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "CineQueue",
-    "version": "0.1.0",
+    "title": "Movies",
+    "version": "0.2.0",
     "description": "Private watch queue. Writes from browsers must be same-origin (or a configured origin) and JSON."
   },
   "servers": [
