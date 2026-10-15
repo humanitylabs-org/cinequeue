@@ -69,7 +69,7 @@ def test_fresh_install_is_empty_healthy_and_honest(app):
     status, body = post(f"{base}/api/request-add", {"text": "Heat 1995"})
     assert status == 503 and body["request"]["status"] == "not_sent"
     with urlopen(f"{base}/") as res:
-        assert b"CineQueue" in res.read()
+        assert b"Movies" in res.read()
 
 
 def test_mcp_lists_tools_and_drives_the_full_queue_lifecycle(app):

@@ -368,7 +368,7 @@ class MovieStore:
             if not movie:
                 raise KeyError(movie_id)
             if not movie.get("queued"):
-                raise WatchStateConflict("Refresh CineQueue to manage watch history")
+                raise WatchStateConflict("Refresh Movies to manage watch history")
             return self.mark_watched(movie_id)
 
     def move_to_top(self, movie_id: str) -> dict[str, Any]:

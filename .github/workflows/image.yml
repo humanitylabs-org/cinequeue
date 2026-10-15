@@ -3,8 +3,6 @@ name: Build, test and publish image
 # (no owner data, no network-dependent integrations), smoke-tests the live container, then publishes
 # the exact tested image to GHCR and as a workflow artifact for boxes without read:packages.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 permissions:
   contents: read
@@ -14,7 +12,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   image:
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, thales]
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4

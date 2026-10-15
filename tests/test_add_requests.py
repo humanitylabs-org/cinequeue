@@ -20,7 +20,7 @@ from cinequeue.server import (
 def test_add_request_prompt_tells_the_agent_to_enrich_through_the_app_not_files():
     prompt = build_cinequeue_add_prompt("Stalker 1979")
 
-    assert prompt.startswith("Add this to the owner's CineQueue: Stalker 1979")
+    assert prompt.startswith("Add this to the owner's Movies: Stalker 1979")
     assert "Resolve exact-title candidates" in prompt
     assert "cinequeue_add" in prompt and "cinequeue_update" in prompt
     assert "cinequeue_request_update" in prompt
@@ -38,7 +38,7 @@ def test_queue_add_request_logs_only_to_cinequeue_queue(tmp_path: Path):
     record = queue_add_request("Stalker 1979", request_log_path=log_path)
 
     assert record["status"] == "queued"
-    assert record["source_app"] == "CineQueue"
+    assert record["source_app"] == "Movies"
     assert record["agent"]
     assert record["text"] == "Stalker 1979"
     assert "prompt" in record
@@ -164,7 +164,7 @@ def test_live_admission_uses_wizard_session_then_run(monkeypatch):
     assert [c[0] for c in calls] == ["/wizard/hermes/api/sessions", "/wizard/hermes/v1/runs"]
     assert calls[0][1]["source"] == "wizard-mobile"
     assert calls[1][1]["session_id"] == calls[0][1]["id"]
-    assert "CineQueue request ID: cinequeue-add-1" in calls[1][1]["input"]
+    assert "Movies request ID: cinequeue-add-1" in calls[1][1]["input"]
     assert calls[1][2]
     assert response == {"status": "accepted", "session_id": calls[0][1]["id"], "run_id": "run_123", "mode": "live"}
 

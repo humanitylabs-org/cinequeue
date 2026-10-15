@@ -20,7 +20,7 @@ from urllib.parse import parse_qs, unquote, urlparse, urlsplit
 from cinequeue.core import MovieStore, WatchStateConflict, parse_movie_requests
 from cinequeue.watch_providers import WatchProviderError, WatchProviderService, configured_region, region_name
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 ROOT = Path(__file__).resolve().parents[1]
 STATIC = ROOT / "web"
 # Owner state lives in one writable directory: the packaged app mounts ${APP_DATA_DIR}/data at /data.
@@ -115,9 +115,9 @@ def lock_add_requests(path: Path | str = ADD_REQUESTS):
 
 def build_cinequeue_add_prompt(text: str) -> str:
     requested = clip(text, 800)
-    return f"""Add this to the owner's CineQueue: {requested}
+    return f"""Add this to the owner's Movies: {requested}
 
-Use the CineQueue app's own MCP tools (cinequeue_*) or its documented HTTP API, not app files, the container or the bare quick-add shortcut alone. Resolve exact-title candidates first (Letterboxd or another reliable film source); if multiple years/titles plausibly match, mark the request blocked with the exact choice needed before writing. Once the intended film/series is clear, add it with cinequeue_add and enrich the card with cinequeue_update: poster, Letterboxd URL/slug, IMDb ID/URL, year, description, genres, directors/creators, cast, trailer, runtime when available, and source. When the owner names specific episodes or other viewing priorities, keep the synopsis clean, put the human note in `notes`, and store structured episode entries in `featured_episodes` so the detail view can highlight them. Only set `rating`, `rating_count` and `rating_source: imdb` from IMDb's official `title.ratings.tsv.gz` dataset; never hand-copy or relabel a Letterboxd score. Replace any bare placeholder instead of duplicating it. Verify with cinequeue_get. Record the request lifecycle with cinequeue_request_update: `processing` when work starts, `completed` only after verification, or `blocked`/`failed` with a concise detail when work cannot finish."""
+Use the Movies app's own MCP tools (cinequeue_*) or its documented HTTP API, not app files, the container or the bare quick-add shortcut alone. Resolve exact-title candidates first (Letterboxd or another reliable film source); if multiple years/titles plausibly match, mark the request blocked with the exact choice needed before writing. Once the intended film/series is clear, add it with cinequeue_add and enrich the card with cinequeue_update: poster, Letterboxd URL/slug, IMDb ID/URL, year, description, genres, directors/creators, cast, trailer, runtime when available, and source. When the owner names specific episodes or other viewing priorities, keep the synopsis clean, put the human note in `notes`, and store structured episode entries in `featured_episodes` so the detail view can highlight them. Only set `rating`, `rating_count` and `rating_source: imdb` from IMDb's official `title.ratings.tsv.gz` dataset; never hand-copy or relabel a Letterboxd score. Replace any bare placeholder instead of duplicating it. Verify with cinequeue_get. Record the request lifecycle with cinequeue_request_update: `processing` when work starts, `completed` only after verification, or `blocked`/`failed` with a concise detail when work cannot finish."""
 
 
 def queue_add_request(text: str, *, request_log_path: Path | str = ADD_REQUESTS) -> dict:
@@ -131,7 +131,7 @@ def queue_add_request(text: str, *, request_log_path: Path | str = ADD_REQUESTS)
         "status": "queued",
         "created_at": created_at,
         "updated_at": created_at,
-        "source_app": "CineQueue",
+        "source_app": "Movies",
         "agent": AGENT_NAME,
         "prompt": build_cinequeue_add_prompt(requested),
     }
@@ -201,7 +201,7 @@ def dispatch_add_request(record: dict, *, mode: str | None = None) -> dict:
     """Hand one saved request to the Wizard Agent Service (the only sanctioned agent route)."""
     request_id = str(record.get("id") or "")
     if not request_id:
-        raise AdmissionError("CineQueue add request has no id")
+        raise AdmissionError("Movies add request has no id")
     mode = mode or ADMIT
     session_id = f"wizard_{int(time.time() * 1000)}_{secrets.token_hex(6)}"
     if mode == "stub":
@@ -210,7 +210,10 @@ def dispatch_add_request(record: dict, *, mode: str | None = None) -> dict:
         raise AdmissionError("Wizard could not be reached (stubbed outage)")
     if mode != "live" or not WIZARD_ORIGIN:
         raise AdmissionError("Agent requests are not configured. Your request is saved; add the title directly or enable the optional Agent Service integration.")
-    prompt = f"{record.get('prompt') or build_cinequeue_add_prompt(record.get('text', ''))}\n\nCineQueue request ID: {request_id}"
+    prompt = f"{record.get('prompt') or build_cinequeue_add_prompt(record.get('text', ''))}\n\nMovies request ID: {request_id}"
+    target = os.environ.get("CINEQUEUE_AGENT_API_URL", "").rstrip("/")
+    if target:
+        prompt += f"\nThis request belongs ONLY to the Movies instance at {target}. Use its documented HTTP API or {target}/mcp. Do not modify a different queue. Read {target}/openapi.json first."
     _wizard("POST", "/wizard/hermes/api/sessions", {"source": "wizard-mobile", "id": session_id})
     run = _wizard(
         "POST",
@@ -322,7 +325,7 @@ def watch_history_feed(limit: int = 100) -> list[dict]:
 
 
 class CineQueueHandler(SimpleHTTPRequestHandler):
-    server_version = "CineQueue/0.1"
+    server_version = "Movies/0.1"
 
     @property
     def store(self) -> MovieStore:
@@ -339,7 +342,7 @@ class CineQueueHandler(SimpleHTTPRequestHandler):
 
     def do_GET(self) -> None:
         if not self._host_ok()[0]:
-            return self._json({"error": "unknown host; open CineQueue through your Wizard"}, HTTPStatus.MISDIRECTED_REQUEST)
+            return self._json({"error": "unknown host; open Movies through your Wizard"}, HTTPStatus.MISDIRECTED_REQUEST)
         parsed = urlparse(self.path)
         if BASE_PATH and parsed.path == BASE_PATH:
             return self._redirect_to_trailing_slash(parsed)
@@ -610,10 +613,11 @@ class CineQueueHandler(SimpleHTTPRequestHandler):
 def run(port: int = 8765, host: str = "127.0.0.1") -> None:
     handler = lambda *args, **kwargs: CineQueueHandler(*args, directory=str(STATIC), **kwargs)
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    MovieStore(DATA)  # a fresh install starts with an empty, working queue
+    from cinequeue.starter import initialize
+    initialize(DATA)  # public seed only when the owner store has never existed
     server = ThreadingHTTPServer((host, port), handler)
     public_path = BASE_PATH or "/"
-    print(f"CineQueue running at http://{host}:{port}{public_path}")
+    print(f"Movies running at http://{host}:{port}{public_path}")
     server.serve_forever()
 
 

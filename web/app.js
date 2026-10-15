@@ -45,13 +45,45 @@ const listChrome = ['.toolbar', '.genre-chips', '.filterbar', '#list'].map(sel =
 const REDUCED_MOTION = window.matchMedia('(prefers-reduced-motion: reduce)');
 
 async function api(path, options = {}) {
-  const res = await fetch(base(path), {
-    headers: { 'Content-Type': 'application/json' },
-    ...options,
-  });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
+  const hold = options.method && options.method !== 'GET' ? window.WizardApp?.update.hold('Saving Movies changes') : null;
+  try {
+    const res = await fetch(base(path), { headers: { 'Content-Type': 'application/json' }, ...options });
+    const data = await res.json();
+    if (!res.ok) { const error = new Error(data.error || 'Request failed'); error.data = data; throw error; }
+    return data;
+  } finally { hold?.release(); }
 }
+let draftHold = null;
+function syncDraftHold() {
+  if (addRequestInput.value.trim()) draftHold ||= window.WizardApp?.update.hold('Unsent movie request');
+  else { draftHold?.release(); draftHold = null; }
+}
+addRequestInput.addEventListener('input', syncDraftHold);
+document.querySelector('#discardDraft').addEventListener('click', () => {
+  addRequestInput.value = ''; syncDraftHold(); setAddRequestStatus('Draft discarded.');
+});
+let requestTimer = 0, lastRequests = '';
+async function refreshRequests() {
+  clearTimeout(requestTimer);
+  try {
+    const { requests = [] } = await api('/api/add-requests');
+    const recent = requests.slice(0, 5);
+    const progress = document.querySelector('#requestProgress');
+    const labels = { queued:'Waiting', dispatched:'Sent to your Wizard', processing:'Finding and enriching', completed:'Added and verified', blocked:'Needs clarification', failed:'Could not complete', not_sent:'Saved, not sent', dispatch_failed:'Could not send' };
+    progress.innerHTML = recent.map(r => `<div class="request-card"><b>${escapeHtml(r.text)}</b><p>${escapeHtml(labels[r.status] || r.status)}${r.status_detail ? ' · ' + escapeHtml(r.status_detail) : ''}</p>${['not_sent','dispatch_failed'].includes(r.status) ? `<button type="button" data-retry="${escapeHtml(r.id)}">Retry saved request</button>` : ''}</div>`).join('');
+    progress.querySelectorAll('[data-retry]').forEach(b => b.addEventListener('click', async () => {
+      b.disabled = true;
+      try { await api('/api/add-requests/' + encodeURIComponent(b.dataset.retry), { method:'POST', body:JSON.stringify({ status:'retry' }) }); }
+      catch (_) { announce('Still could not send. Your request is saved.'); }
+      finally { await refreshRequests(); }
+    }));
+    const signature = JSON.stringify(recent.map(r => [r.id,r.status,r.updated_at]));
+    if (lastRequests && signature !== lastRequests && recent.some(r => r.status === 'completed')) await loadMovies();
+    lastRequests = signature;
+  } catch (_) { /* durable status remains visible through a transient outage */ }
+  requestTimer = setTimeout(refreshRequests, document.hidden ? 30000 : 5000);
+}
+
 
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
@@ -71,12 +103,12 @@ function syncAddMode() {
   const title = document.querySelector('#addRequestTitle');
   const copy = addRequestPanel?.querySelector('.add-request-copy');
   if (agentReady()) {
-    if (kicker) kicker.textContent = 'new CineQueue request';
+    if (kicker) kicker.textContent = 'new Movies request';
     if (title) title.textContent = `Ask ${agentName()}`;
     if (copy) copy.textContent = 'Request a proper enriched card. I’ll resolve the exact title before adding it.';
     if (addRequestButton) addRequestButton.textContent = 'Request add';
   } else {
-    if (kicker) kicker.textContent = 'add to CineQueue';
+    if (kicker) kicker.textContent = 'add to Movies';
     if (title) title.textContent = 'Add a title';
     if (copy) copy.textContent = 'Type one or more titles, like “Stalker 1979, Heat”. They go to the top of your queue as simple cards.';
     if (addRequestButton) addRequestButton.textContent = 'Add to queue';
@@ -121,6 +153,7 @@ async function submitAddRequest(event) {
         setAddRequestStatus(`${label} added to the top of your queue.`, 'ok');
         announce(`${label} added`);
         addRequestInput.value = '';
+        syncDraftHold();
         await loadMovies();
         setTimeout(closeAddRequestPanel, 600);
       } else {
@@ -139,12 +172,16 @@ async function submitAddRequest(event) {
   setAddRequestStatus(`Queuing with ${agentName()}…`);
   try {
     await api('/api/request-add', { method: 'POST', body: JSON.stringify({ text }) });
-    setAddRequestStatus('Saved in CineQueue requests.', 'ok');
+    setAddRequestStatus('Sent to your Wizard. Progress appears above the queue.', 'ok');
     addRequestInput.value = '';
+    syncDraftHold();
+    await refreshRequests();
     setTimeout(closeAddRequestPanel, 350);
   } catch (error) {
     console.error(error);
-    setAddRequestStatus(`Request saved, but ${agentName()} could not start. Try again shortly.`, 'error');
+    setAddRequestStatus(error.data?.request ? 'Request saved but not sent. Use Retry saved request above the queue.' : 'Could not save your request. Your draft is still here.', 'error');
+    if (error.data?.request) { addRequestInput.value = ''; syncDraftHold(); }
+    await refreshRequests();
   } finally {
     addRequestButton.disabled = false;
     addRequestButton.textContent = 'Request add';
@@ -1198,6 +1235,7 @@ function openMovie(movieId, push = true, { preserveScroll = false, focusEventId 
           <p class="watch-attribution">Streaming data from JustWatch</p>
         </section>` : ''}
         <div class="detail-links">
+          <button class="detail-share" type="button">Share movie</button>
           ${trailer}
           ${imdb}
           ${lb}
@@ -1217,6 +1255,10 @@ function openMovie(movieId, push = true, { preserveScroll = false, focusEventId 
     </article>`;
   loadWhereToWatch(movie);
   detail.querySelector('.back').addEventListener('click', returnToList);
+  detail.querySelector('.detail-share').addEventListener('click', async () => {
+    const result = await window.WizardApp?.share.text({ title:movie.title, text:`${movie.title}${movie.year ? ' (' + movie.year + ')' : ''}`, url:movie.imdb_url || movie.letterboxd_url || location.href });
+    announce(result === 'shared' ? 'Shared' : result === 'copied' ? 'Copied' : result === 'cancelled' ? 'Share cancelled' : 'Sharing is unavailable');
+  });
   detail.querySelector('.detail-watch').addEventListener('click', async (event) => {
     const button = event.currentTarget;
     if (button.disabled) return;
@@ -1375,50 +1417,25 @@ window.addEventListener('keydown', (event) => {
     }
   }
 });
-// Back never exits on one press: top overlay → nested detail → root list → "press back again" floor.
+// Core owns platform/root Back. These are only Movies domain steps.
 let suppressPopUntil = 0;
-let exitArmedUntil = 0;
-let backHintTimer = 0;
-function quietBack() {
-  suppressPopUntil = Date.now() + 600;
-  history.back();
-}
+function quietBack() { suppressPopUntil = Date.now() + 600; history.back(); }
 function returnToList() {
   if (history.state?.cq === 'movie') quietBack();
-  else if (history.state?.cq !== 'root') history.pushState({ cq: 'root' }, '', base('/'));
+  else history.replaceState({ cq:'root' }, '', base('/'));
   showList();
 }
-function showBackHint() {
-  const hint = document.querySelector('#backHint');
-  announce('Press back again to exit');
-  if (!hint) return;
-  hint.hidden = false;
-  clearTimeout(backHintTimer);
-  backHintTimer = setTimeout(() => { hint.hidden = true; }, 2000);
-}
-function onPopState(event) {
+window.addEventListener('popstate', () => {
   if (Date.now() < suppressPopUntil) { suppressPopUntil = 0; return; }
-  if (addRequestPanel && !addRequestPanel.hidden) { hideAddRequestPanel(); return; }
-  if (event.state?.cq === 'root-floor') {
-    if (Date.now() < exitArmedUntil) { history.back(); return; }
-    exitArmedUntil = Date.now() + 2000;
-    if (openMenu) closeMenu();
-    history.pushState({ cq: 'root' }, '', base('/'));
-    showList();
-    showBackHint();
-    return;
-  }
+  if (!addRequestPanel.hidden) { hideAddRequestPanel(); return; }
   route();
-}
-(function installBackFloor() {
-  if (history.state?.cq) return; // reload keeps the existing in-app stack
-  const here = location.pathname + location.search + location.hash;
-  const clean = BASE_PATH && location.pathname.startsWith(BASE_PATH) ? location.pathname.slice(BASE_PATH.length) : location.pathname;
-  history.replaceState({ cq: 'root-floor' }, '', base('/'));
-  history.pushState({ cq: 'root' }, '', base('/'));
-  if (/^\/movie\/[^/]+/.test(clean)) history.pushState({ cq: 'movie' }, '', here);
-})();
-window.addEventListener('popstate', onPopState);
+});
+window.WizardApp?.back.useHistory({ isRoot: () => addRequestPanel.hidden && detail.classList.contains('hidden') });
+window.WizardApp?.back.register({
+  canGoBack: () => Boolean(openMenu) || (!detail.classList.contains('hidden') && history.state?.cq !== 'movie'),
+  back: () => { if (openMenu) closeMenu(); else returnToList(); return true; }
+});
+window.WizardApp?.ready({ name:'Movies' }).then(syncDraftHold);
 const brandLink = document.querySelector('.brand');
 if (brandLink) brandLink.addEventListener('click', (event) => {
   event.preventDefault();
@@ -1429,11 +1446,11 @@ async function loadConfig() {
     const data = await api('/api/config');
     appConfig = { ...appConfig, ...data };
   } catch (error) {
-    console.warn('CineQueue config unavailable; agent requests and where-to-watch stay off', error?.name || 'Error');
+    console.warn('Movies config unavailable; agent requests and where-to-watch stay off', error?.name || 'Error');
   }
   syncAddMode();
 }
-loadConfig().then(loadMovies).catch(error => {
+loadConfig().then(async () => { await loadMovies(); await refreshRequests(); }).catch(error => {
   list.innerHTML = '<div class="empty">Could not load movies.</div>';
   console.error(error);
 });

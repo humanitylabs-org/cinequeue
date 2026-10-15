@@ -1,4 +1,4 @@
-/* CineQ: offer installation only when the browser supplies an install prompt. */
+/* Movies: offer installation only when the browser supplies an install prompt. */
 (() => {
   'use strict';
   const script = document.currentScript;
@@ -53,7 +53,7 @@
       else { dismissedHere = true; dismiss(); }
     } catch (error) {
       // A rejected/consumed capability is not a reason to advertise installation.
-      console.warn('CineQ installation prompt unavailable', error?.name || 'Error');
+      console.warn('Movies installation prompt unavailable', error?.name || 'Error');
     } finally { deferred = null; busy = false; render(); }
   }
 

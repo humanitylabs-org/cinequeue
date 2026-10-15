@@ -1,7 +1,7 @@
 {
   "id": "./",
-  "name": "CineQueue",
-  "short_name": "CineQueue",
+  "name": "Movies",
+  "short_name": "Movies",
   "description": "Your private movie and series watch queue.",
   "start_url": "./",
   "scope": "./",

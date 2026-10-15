@@ -1,4 +1,4 @@
-# CineQueue
+# Movies
 
 A private watch queue for films and series: add titles, reorder and bump them, open a detail card,
 swipe a row to mark it watched or archive it, keep a dated watch history and queue rewatches.

@@ -1,8 +1,8 @@
 ---
 name: cinequeue
-description: Use when reading or changing the owner's CineQueue watch queue.
+description: Use when reading or changing the owner's Movies watch queue.
 ---
-# CineQueue agent skill
+# Movies agent skill
 
 Use this app's `/mcp` JSON-RPC endpoint (or the documented `/api`), never files in its container.
 - `cinequeue_list`: queue in order (`view` queue|watched|archived|all, optional `search`, `limit`).
