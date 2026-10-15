@@ -41,7 +41,7 @@ function check(c,n,d){checks.push({name:n,passed:!!c,detail:d});assert(c,n+': '+
    await f.waitForFunction(id=>WizardApp.theme.get()?.skin===id,skin);
    check(await f.locator('#addRequestInput').inputValue()==='Unsent movie draft',skin+' preserves draft');
    check(await f.evaluate(()=>performance.timeOrigin)===boot,skin+' no reload');
-   colors.push(await f.locator('.movie-surface').first().evaluate(e=>getComputedStyle(e).backgroundColor));
+   colors.push(await f.locator('.movie-surface').first().evaluate(e=>getComputedStyle(e).backgroundImage));
    await f.locator('#addRequestClose').click();
    await p.screenshot({path:out+'/'+skin+'.png'});
    await f.locator('#addOpen').click();

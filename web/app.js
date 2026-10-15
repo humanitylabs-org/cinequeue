@@ -48,7 +48,7 @@ async function api(path, options = {}) {
   const hold = options.method && options.method !== 'GET' ? window.WizardApp?.update.hold('Saving Movies changes') : null;
   try {
     const res = await fetch(base(path), { headers: { 'Content-Type': 'application/json' }, ...options });
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
     if (!res.ok) { const error = new Error(data.error || 'Request failed'); error.data = data; throw error; }
     return data;
   } finally { hold?.release(); }
@@ -179,7 +179,7 @@ async function submitAddRequest(event) {
     setTimeout(closeAddRequestPanel, 350);
   } catch (error) {
     console.error(error);
-    setAddRequestStatus(error.data?.request ? 'Request saved but not sent. Use Retry saved request above the queue.' : 'Could not save your request. Your draft is still here.', 'error');
+    setAddRequestStatus(error.data?.request ? 'Request saved but not sent. Use Retry saved request above the queue.' : 'Could not confirm your request. Your draft is still here; check progress before retrying.', 'error');
     if (error.data?.request) { addRequestInput.value = ''; syncDraftHold(); }
     await refreshRequests();
   } finally {

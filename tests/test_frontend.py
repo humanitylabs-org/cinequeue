@@ -226,7 +226,7 @@ def test_home_has_agent_add_request_composer_with_direct_add_fallback():
     assert "openAddRequestPanel" in APP
     assert "closeAddRequestPanel" in APP
     assert "Sent to your Wizard" in APP
-    assert "Could not save your request" in APP and "Archimedes" not in APP
+    assert "Could not confirm your request" in APP and "Archimedes" not in APP
     assert "'.add-request'" not in APP
     assert ".add-request-panel" in CSS
     assert ".add-request-status.ok" in CSS

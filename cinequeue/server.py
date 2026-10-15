@@ -325,7 +325,7 @@ def watch_history_feed(limit: int = 100) -> list[dict]:
 
 
 class CineQueueHandler(SimpleHTTPRequestHandler):
-    server_version = "Movies/0.1"
+    server_version = "Movies/0.2"
 
     @property
     def store(self) -> MovieStore:
@@ -350,6 +350,23 @@ class CineQueueHandler(SimpleHTTPRequestHandler):
         if clean_path in ("/healthz", "/api/health"):
             ok, payload = health()
             return self._json(payload, HTTPStatus.OK if ok else HTTPStatus.SERVICE_UNAVAILABLE)
+        if clean_path == "/wizard-os-home/core/app-client.js":
+            origin = os.environ.get("CINEQUEUE_SHARED_ORIGIN", "") or WIZARD_ORIGIN
+            if not origin:
+                return self._json({"error": "Open Movies through Wizard, or configure CINEQUEUE_SHARED_ORIGIN for standalone access"}, HTTPStatus.SERVICE_UNAVAILABLE)
+            try:
+                request = urllib.request.Request(origin.rstrip("/") + "/wizard-os-home/core/app-client.js")
+                with urllib.request.urlopen(request, timeout=5) as response:
+                    content = response.read(256 * 1024)
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "application/javascript")
+                self.send_header("Cache-Control", "no-cache")
+                self.send_header("Content-Length", str(len(content)))
+                self.end_headers()
+                self.wfile.write(content)
+                return None
+            except Exception:
+                return self._json({"error": "Wizard shared interface is temporarily unavailable"}, HTTPStatus.SERVICE_UNAVAILABLE)
         if clean_path == "/api/config":
             return self._json(public_config())
         if clean_path == "/api/history":
