@@ -1,71 +1,45 @@
-name: Build, test and publish image
-# Builds the code-only CineQueue image, runs the synthetic test suite inside the hardened container
-# (no owner data, no network-dependent integrations), smoke-tests the live container, then publishes
-# the exact tested image to GHCR and as a workflow artifact for boxes without read:packages.
+name: Publish Thales-tested images
+# No builds run on GitHub: load the exact archives built and tested on Thales.
 on:
   workflow_dispatch:
+    inputs:
+      release:
+        description: Private prerelease containing the two verified image archives
+        required: true
+      revision:
+        description: Exact GitHub source SHA built on Thales
+        required: true
 permissions:
   contents: read
   packages: write
-concurrency:
-  group: image-${{ github.ref }}
-  cancel-in-progress: false
 jobs:
-  image:
-    runs-on: [self-hosted, thales]
-    timeout-minutes: 30
+  publish:
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - name: Read the release version
-        id: v
-        run: echo "version=$(python3 -c 'import json; print(json.load(open("runtipi/config.json"))["version"])')" >> "$GITHUB_OUTPUT"
-      - name: Recipe, wizard.md, OpenAPI and service agree on the version
+      - name: Download private, already-built image archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE: ${{ inputs.release }}
+        run: gh release download "$RELEASE" --repo "$GITHUB_REPOSITORY" --pattern 'movies-*.tar.gz' --pattern 'SHA256SUMS' --dir images
+      - name: Verify and load exact archives (not a build)
         run: |
-          V='${{ steps.v.outputs.version }}'
-          grep -q "image: ghcr.io/humanitylabs-org/cinequeue:$V\$" runtipi/docker-compose.yml
-          grep -q "^version: $V\$" wizard.md
-          grep -q "^VERSION = \"$V\"\$" cinequeue/server.py
-          python3 -c "import json,sys; assert json.load(open('openapi.json'))['info']['version']=='$V'"
-          ! grep -q '^ *ports:' runtipi/docker-compose.yml
-      - name: Build (linux/amd64)
-        run: docker build --platform linux/amd64 --label org.opencontainers.image.source=https://github.com/${{ github.repository }} --label org.wizard.source.sha=${{ github.sha }} -t cinequeue:ci .
-      - name: Image holds code only
-        run: docker run --rm --read-only --tmpfs /tmp cinequeue:ci python -c 'import pathlib; p=pathlib.Path("/app"); assert not (p/"data").exists(); assert not (p/"tests").exists(); assert not list(p.rglob("*.json.lock")); assert sorted(x.name for x in p.iterdir())==["LICENSE","cinequeue","openapi.json","start.py","web"], sorted(x.name for x in p.iterdir()); print("CODE_ONLY_OK")'
-      - name: Synthetic suite in the hardened container
-        run: |
-          mkdir -p "$RUNNER_TEMP/pt" && chmod 777 "$RUNNER_TEMP/pt"
-          docker run --rm --user 1000:1000 -v "$RUNNER_TEMP/pt:/pt" cinequeue:ci sh -c 'pip install -q --no-cache-dir --target /pt pytest==8.3.3'
-          docker run --rm --user 1000:1000 --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges:true --memory 256m \
-            -v "$PWD/tests:/app/tests:ro" -v "$RUNNER_TEMP/pt:/pt:ro" -e PYTHONPATH=/app:/pt -e CINEQUEUE_DATA=/tmp/cq-data -w /app \
-            cinequeue:ci python -m pytest -q -p no:cacheprovider tests
-      - name: Live container smoke (health, view, API, MCP, one write+read)
-        run: |
-          mkdir -p "$RUNNER_TEMP/data" && sudo chown root:root "$RUNNER_TEMP/data" && sudo chmod 755 "$RUNNER_TEMP/data"
-          docker run -d --name cinequeue-smoke --read-only --tmpfs /tmp --cap-drop ALL --cap-add CHOWN --cap-add SETUID --cap-add SETGID --security-opt no-new-privileges:true -p 127.0.0.1:8765:8765 -v "$RUNNER_TEMP/data:/data" cinequeue:ci
-          for i in $(seq 30); do curl -fsS http://127.0.0.1:8765/healthz && break; sleep 1; done
-          curl -fsS http://127.0.0.1:8765/ | grep -q '<title>CineQueue</title>'
-          curl -fsS http://127.0.0.1:8765/api/movies | python3 -c 'import json,sys; assert json.load(sys.stdin)["movies"]==[]'
-          curl -fsS -X POST -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' http://127.0.0.1:8765/mcp | python3 -c 'import json,sys; t=json.load(sys.stdin)["result"]["tools"]; assert len(t)>=10; print(len(t),"tools")'
-          curl -fsS -X POST -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"cinequeue_add","arguments":{"title":"Synthetic Film","year":2001}}}' http://127.0.0.1:8765/mcp >/dev/null
-          curl -fsS http://127.0.0.1:8765/api/movies | python3 -c 'import json,sys; m=json.load(sys.stdin)["movies"]; assert [x["title"] for x in m]==["Synthetic Film"], m'
-          docker exec cinequeue-smoke sh -c 'grep -E "^(Uid|CapEff)" /proc/1/status; grep -Eq "^Uid:\s+1000\s+1000\s+1000\s+1000" /proc/1/status && grep -Eq "^CapEff:\s+0+$" /proc/1/status && echo SERVER_RUNS_AS_1000_WITH_NO_CAPABILITIES'
-          curl -fsS -X POST -H 'Host: 127.0.0.1:9234' -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":3,"method":"tools/list"}' http://127.0.0.1:8765/mcp >/dev/null && echo AGENT_AT_PUBLISHED_PORT_OK
-          docker rm -f cinequeue-smoke
+          cd images
+          sha256sum --check SHA256SUMS
+          for f in movies-*.tar.gz; do docker load < "$f"; done
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Publish the exact tested image
+      - name: Publish architecture-specific images and manifest
+        env:
+          REVISION: ${{ inputs.revision }}
         run: |
-          V='${{ steps.v.outputs.version }}'
-          for tag in "$V" "main-${GITHUB_SHA::7}"; do
-            docker tag cinequeue:ci "ghcr.io/humanitylabs-org/cinequeue:$tag"
-            docker push "ghcr.io/humanitylabs-org/cinequeue:$tag"
+          set -euo pipefail
+          for arch in amd64 arm64; do
+            image="ghcr.io/humanitylabs-org/cinequeue:0.2.0-$arch"
+            test "$(docker image inspect "$image" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" = "$REVISION"
+            docker push "$image"
           done
-          docker save "ghcr.io/humanitylabs-org/cinequeue:$V" | gzip > "$RUNNER_TEMP/cinequeue-image-amd64.tar.gz"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: image-amd64
-          path: ${{ runner.temp }}/cinequeue-image-amd64.tar.gz
-          retention-days: 30
+          docker buildx imagetools create -t ghcr.io/humanitylabs-org/cinequeue:0.2.0 ghcr.io/humanitylabs-org/cinequeue:0.2.0-amd64 ghcr.io/humanitylabs-org/cinequeue:0.2.0-arm64
+          docker buildx imagetools inspect ghcr.io/humanitylabs-org/cinequeue:0.2.0

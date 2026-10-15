@@ -33,6 +33,9 @@ function check(c,n,d){checks.push({name:n,passed:!!c,detail:d});assert(c,n+': '+
   check(initial.includes('batman-begins-2005'),'starter visible',initial);
   await f.locator('#addOpen').click();await f.locator('#addRequestInput').fill('Unsent movie draft');
   const boot=await f.evaluate(()=>performance.timeOrigin); const colors=[];
+  // Daily canonical shell no longer exposes the picker; exercise the retained
+  // skin module as compatibility QA, not as a claim that a picker ships.
+  if(!await p.evaluate(()=>Boolean(window.WosSkin))) await p.addScriptTag({url:'/wizard-os-home/core/skins.js'});
   for(const skin of ['nebula','grove','tide','ember','signal']){
    await p.evaluate(id=>WosSkin.set(id),skin);
    await f.waitForFunction(id=>WizardApp.theme.get()?.skin===id,skin);
