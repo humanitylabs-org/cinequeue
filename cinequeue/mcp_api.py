@@ -31,8 +31,8 @@ TOOLS = [
     {"name": "cinequeue_request", "description": "Save a natural-language 'find and add this' request; it is sent to the Agent Service only when the operator enabled that integration. Returns sent=false honestly otherwise.",
      "inputSchema": schema({"text": S}, ("text",))},
     {"name": "cinequeue_requests", "description": "List saved add requests and their lifecycle status.", "inputSchema": schema({})},
-    {"name": "cinequeue_request_update", "description": "Record an add request's lifecycle: processing, completed (only after verification), blocked or failed, with a concise detail.",
-     "inputSchema": schema({"id": S, "status": {"type": "string", "enum": ["processing", "completed", "blocked", "failed"]}, "detail": S}, ("id", "status"))},
+    {"name": "cinequeue_request_update", "description": "Record an add request's lifecycle: processing, completed (only after verification), blocked or failed. For blocked, detail is one short question (no URLs) and choices lists 2-6 short answers the owner can tap; their pick is sent back to you automatically.",
+     "inputSchema": schema({"id": S, "status": {"type": "string", "enum": ["processing", "completed", "blocked", "failed"]}, "detail": S, "choices": {"type": "array", "items": S}}, ("id", "status"))},
 ]
 
 
@@ -120,7 +120,7 @@ def call(name: str, a: dict) -> dict:
     if name == "cinequeue_requests":
         return {"requests": [{k: v for k, v in r.items() if k != "prompt"} for r in server.load_add_requests(server.ADD_REQUESTS)]}
     if name == "cinequeue_request_update":
-        return {"request": server.update_add_request(a["id"], a["status"], detail=str(a.get("detail") or ""), request_log_path=server.ADD_REQUESTS)}
+        return {"request": server.update_add_request(a["id"], a["status"], detail=str(a.get("detail") or ""), request_log_path=server.ADD_REQUESTS, choices=a.get("choices") if "choices" in a else None)}
     raise ValueError("Unknown tool")
 
 

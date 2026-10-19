@@ -292,3 +292,12 @@ def test_frontend_urls_are_relative_and_owner_neutral():
     import re
     for text in (APP, INDEX):
         assert not re.search(r"https?://[a-z0-9.-]+\.(ts\.net|local)\b", text)
+
+
+def test_request_cards_only_show_actionable_states():
+    skin = (ROOT / "web" / "movies-skin.css").read_text()
+    assert "requestCardModel" in APP and "renderRequestCard" in APP
+    # Completed requests never render a card; the movie itself is the result.
+    assert "Added and verified" not in APP
+    assert 'data-request-action="answer"' in APP
+    assert ".request-choice" in skin

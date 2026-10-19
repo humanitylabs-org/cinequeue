@@ -602,7 +602,7 @@
     },
     "/api/add-requests/{id}": {
       "post": {
-        "summary": "Record request lifecycle (processing|completed|blocked|failed) or status=retry to resend",
+        "summary": "Record request lifecycle (processing|completed|blocked|failed; blocked takes a short question in detail plus 2-6 tappable choices), or owner actions status=retry|answer (with answer)|dismiss",
         "responses": {
           "200": {
             "description": "OK",
@@ -626,6 +626,15 @@
                     "type": "string"
                   },
                   "detail": {
+                    "type": "string"
+                  },
+                  "choices": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "answer": {
                     "type": "string"
                   }
                 }

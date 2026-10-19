@@ -39,6 +39,9 @@ AGENT_NAME = os.environ.get("CINEQUEUE_AGENT_NAME", "").strip()[:40] or "your Wi
 ORIGINS = {o.strip().rstrip("/") for o in os.environ.get("CINEQUEUE_ORIGINS", "").split(",") if o.strip()}
 ORIGIN_HOSTS = {urlsplit(o).netloc for o in ORIGINS}
 REQUEST_STATUSES = ("queued", "dispatched", "processing", "completed", "blocked", "failed")
+# A request still "in flight" this long after its last update is treated as stalled and offered a retry.
+STALE_REQUEST_SECONDS = 6 * 3600
+MAX_REQUEST_CHOICES = 6
 METADATA_FIELDS = {
     "title": str, "year": (int, type(None)), "poster": str, "letterboxd_url": str, "letterboxd_slug": str,
     "description": str, "genres": list, "directors": list, "creators": list, "cast": list, "trailer_url": str,
@@ -117,7 +120,7 @@ def build_cinequeue_add_prompt(text: str) -> str:
     requested = clip(text, 800)
     return f"""Add this to the owner's Movies: {requested}
 
-Use the Movies app's own MCP tools (cinequeue_*) or its documented HTTP API, not app files, the container or the bare quick-add shortcut alone. Resolve exact-title candidates first (Letterboxd or another reliable film source); if multiple years/titles plausibly match, mark the request blocked with the exact choice needed before writing. Once the intended film/series is clear, add it with cinequeue_add and enrich the card with cinequeue_update: poster, Letterboxd URL/slug, IMDb ID/URL, year, description, genres, directors/creators, cast, trailer, runtime when available, and source. When the owner names specific episodes or other viewing priorities, keep the synopsis clean, put the human note in `notes`, and store structured episode entries in `featured_episodes` so the detail view can highlight them. Only set `rating`, `rating_count` and `rating_source: imdb` from IMDb's official `title.ratings.tsv.gz` dataset; never hand-copy or relabel a Letterboxd score. Replace any bare placeholder instead of duplicating it. Verify with cinequeue_get. Record the request lifecycle with cinequeue_request_update: `processing` when work starts, `completed` only after verification, or `blocked`/`failed` with a concise detail when work cannot finish."""
+Use the Movies app's own MCP tools (cinequeue_*) or its documented HTTP API, not app files, the container or the bare quick-add shortcut alone. Resolve exact-title candidates first (Letterboxd or another reliable film source); if multiple years/titles plausibly match, mark the request blocked before writing: `detail` is one short question (no URLs) and `choices` lists 2-6 short tappable answers such as "Metropolis (1927) · Fritz Lang"; the owner taps one in the app. Once the intended film/series is clear, add it with cinequeue_add and enrich the card with cinequeue_update: poster, Letterboxd URL/slug, IMDb ID/URL, year, description, genres, directors/creators, cast, trailer, runtime when available, and source. When the owner names specific episodes or other viewing priorities, keep the synopsis clean, put the human note in `notes`, and store structured episode entries in `featured_episodes` so the detail view can highlight them. Only set `rating`, `rating_count` and `rating_source: imdb` from IMDb's official `title.ratings.tsv.gz` dataset; never hand-copy or relabel a Letterboxd score. Replace any bare placeholder instead of duplicating it. Verify with cinequeue_get. Record the request lifecycle with cinequeue_request_update: `processing` when work starts, `completed` only after verification, or `blocked`/`failed` with a concise detail when work cannot finish."""
 
 
 def queue_add_request(text: str, *, request_log_path: Path | str = ADD_REQUESTS) -> dict:
@@ -150,6 +153,7 @@ def update_add_request(
     request_log_path: Path | str = ADD_REQUESTS,
     extra: dict | None = None,
     expected_status: set[str] | None = None,
+    choices: list | None = None,
 ) -> dict:
     with lock_add_requests(request_log_path):
         items = load_add_requests(request_log_path)
@@ -161,6 +165,8 @@ def update_add_request(
             item["updated_at"] = utc_now()
             if detail:
                 item["status_detail"] = clip(detail, 800)
+            if choices is not None:
+                item["choices"] = clean_choices(choices)
             if extra:
                 item.update(extra)
             save_add_requests(items, request_log_path)
@@ -262,13 +268,75 @@ def dispatch_saved_request(
     )
 
 
+def clean_choices(choices: object) -> list[str]:
+    if not isinstance(choices, list):
+        return []
+    out: list[str] = []
+    for choice in choices:
+        text = clip(choice, 120)
+        if text and text not in out:
+            out.append(text)
+    return out[:MAX_REQUEST_CHOICES]
+
+
+def _age_seconds(timestamp: object) -> float:
+    try:
+        moment = dt.datetime.fromisoformat(str(timestamp).replace("Z", "+00:00"))
+    except ValueError:
+        return 0.0
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=dt.timezone.utc)
+    return (dt.datetime.now(dt.timezone.utc) - moment).total_seconds()
+
+
+def request_is_stalled(record: dict) -> bool:
+    return record.get("status") in {"queued", "dispatched", "processing"} and _age_seconds(record.get("updated_at")) > STALE_REQUEST_SECONDS
+
+
 def retry_add_request(request_id: str, *, request_log_path: Path | str = ADD_REQUESTS, dispatcher=dispatch_add_request) -> dict:
     record = next((item for item in load_add_requests(request_log_path) if item.get("id") == request_id), None)
     if record is None:
         raise KeyError(request_id)
-    if record.get("status") not in {"not_sent", "dispatch_failed"}:
+    retryable = record.get("status") in {"not_sent", "dispatch_failed", "failed"} or request_is_stalled(record)
+    if not retryable:
         return record
-    return dispatch_saved_request(record, request_log_path=request_log_path, dispatcher=dispatcher)
+    # Re-open the record so dispatch can move it forward again.
+    reopened = update_add_request(request_id, "queued", request_log_path=request_log_path, extra={"status_detail": ""})
+    return dispatch_saved_request(reopened, request_log_path=request_log_path, dispatcher=dispatcher)
+
+
+def answer_add_request(
+    request_id: str,
+    answer: str,
+    *,
+    request_log_path: Path | str = ADD_REQUESTS,
+    dispatcher=dispatch_add_request,
+) -> dict:
+    """The owner answered a clarification: send the original request back with their choice."""
+    answer = clip(answer, 200)
+    if not answer:
+        raise ValueError("answer is required")
+    record = next((item for item in load_add_requests(request_log_path) if item.get("id") == request_id), None)
+    if record is None:
+        raise KeyError(request_id)
+    if record.get("status") != "blocked":
+        return record
+    question = clip(record.get("status_detail"), 400)
+    prompt = build_cinequeue_add_prompt(record.get("text", "")) + (
+        f"\n\nThis request was blocked for clarification ({question}). The owner has now chosen: {answer}. "
+        "Add exactly that title (or update it if it is already in the list); do not ask again."
+    )
+    reopened = update_add_request(
+        request_id,
+        "queued",
+        request_log_path=request_log_path,
+        extra={"answer": answer, "answered_at": utc_now(), "prompt": prompt, "status_detail": "", "choices": []},
+    )
+    return dispatch_saved_request(reopened, request_log_path=request_log_path, dispatcher=dispatcher)
+
+
+def dismiss_add_request(request_id: str, *, request_log_path: Path | str = ADD_REQUESTS) -> dict:
+    return update_add_request(request_id, "dismissed", request_log_path=request_log_path, extra={"dismissed_at": utc_now()})
 
 
 def public_config() -> dict:
@@ -483,10 +551,22 @@ class CineQueueHandler(SimpleHTTPRequestHandler):
             try:
                 if status == "retry":
                     record = retry_add_request(request_id, request_log_path=ADD_REQUESTS)
+                elif status == "answer":
+                    record = answer_add_request(request_id, str(payload.get("answer") or ""), request_log_path=ADD_REQUESTS)
+                elif status == "dismiss":
+                    record = dismiss_add_request(request_id, request_log_path=ADD_REQUESTS)
                 elif status in REQUEST_STATUSES:
-                    record = update_add_request(request_id, status, detail=str(payload.get("detail") or ""), request_log_path=ADD_REQUESTS)
+                    record = update_add_request(
+                        request_id,
+                        status,
+                        detail=str(payload.get("detail") or ""),
+                        request_log_path=ADD_REQUESTS,
+                        choices=payload.get("choices") if "choices" in payload else None,
+                    )
                 else:
-                    return self._json({"error": "status must be retry or one of " + ", ".join(REQUEST_STATUSES)}, HTTPStatus.BAD_REQUEST)
+                    return self._json({"error": "status must be retry, answer, dismiss or one of " + ", ".join(REQUEST_STATUSES)}, HTTPStatus.BAD_REQUEST)
+            except ValueError as exc:
+                return self._json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
             except KeyError:
                 return self._json({"error": "request not found"}, HTTPStatus.NOT_FOUND)
             except AddRequestDispatchError as exc:

@@ -15,9 +15,10 @@ Use this app's `/mcp` JSON-RPC endpoint (or the documented `/api`), never files 
 - `cinequeue_watch_again`: requeue a watched title, keeping history. `cinequeue_history`: newest first.
 - `cinequeue_archive`: hide/restore; nothing is deleted.
 - `cinequeue_request` / `cinequeue_requests` / `cinequeue_request_update`: the "find and add"
-  request log. When you are handed a request, mark it `processing`, resolve the exact title (ask
-  via `blocked` with the exact choice when ambiguous), add + enrich, verify with `cinequeue_get`,
-  then mark `completed`.
+  request log. When you are handed a request, mark it `processing`, resolve the exact title (when
+  ambiguous, mark `blocked` with `detail` = one short question, no URLs, and `choices` = 2-6 short
+  tappable answers; the owner's tap comes back to you as a new run), add + enrich, verify with
+  `cinequeue_get`, then mark `completed`. Completed requests are hidden in the app.
 
 Ratings: only set `rating`, `rating_count`, `rating_source: imdb` from IMDb's official
 `title.ratings.tsv.gz`; never relabel another site's score. Keep synopses clean; human notes go in
