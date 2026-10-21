@@ -87,7 +87,18 @@ html[data-wz-hosted] .topbar .brand { display: none; }
 html:not([data-wz-hosted]) body { background: var(--mv-bg) !important; }
 #requestProgress:empty { display:none; }
 .request-card { margin: 8px 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--mv-fill); font-size: 13px; }
-.request-card p { margin: 4px 0; }
+.request-card p { margin: 4px 0; color: var(--mv-text-2); }
+.request-card.ask { border-color: var(--mv-accent-line); background: var(--mv-accent-wash); }
+.request-head { display: flex; align-items: center; gap: 8px; }
+.request-choices { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.request-choice { text-align: left; padding: 9px 12px; min-height: 40px; border-radius: 9px; border: 1px solid var(--mv-accent-line); background: var(--mv-raised); color: var(--mv-text); font: inherit; cursor: pointer; }
+.request-choice:active { background: var(--mv-hover); }
+.request-actions { display: flex; gap: 8px; margin-top: 8px; justify-content: flex-end; }
+.request-action { padding: 6px 12px; min-height: 34px; border-radius: 8px; border: 1px solid var(--mv-accent-line); background: transparent; color: var(--mv-accent-ink); font: inherit; cursor: pointer; }
+.request-action.quiet { border-color: transparent; color: var(--mv-text-3); }
+.request-card button:disabled { opacity: .5; }
+.request-spinner { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--mv-border); border-top-color: var(--mv-accent); animation: request-spin 1s linear infinite; }
+@keyframes request-spin { to { transform: rotate(360deg); } }
 .add-open {
   margin-left: auto;
   border-color: var(--mv-accent-line);

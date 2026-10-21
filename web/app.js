@@ -67,14 +67,19 @@ async function refreshRequests() {
   clearTimeout(requestTimer);
   try {
     const { requests = [] } = await api('/api/add-requests');
-    const recent = requests.slice(0, 5);
+    const recent = requests.slice(0, 20);
     const progress = document.querySelector('#requestProgress');
-    const labels = { queued:'Waiting', dispatched:'Sent to your Wizard', processing:'Finding and enriching', completed:'Added and verified', blocked:'Needs clarification', failed:'Could not complete', not_sent:'Saved, not sent', dispatch_failed:'Could not send' };
-    progress.innerHTML = recent.map(r => `<div class="request-card"><b>${escapeHtml(r.text)}</b><p>${escapeHtml(labels[r.status] || r.status)}${r.status_detail ? ' · ' + escapeHtml(r.status_detail) : ''}</p>${['not_sent','dispatch_failed'].includes(r.status) ? `<button type="button" data-retry="${escapeHtml(r.id)}">Retry saved request</button>` : ''}</div>`).join('');
-    progress.querySelectorAll('[data-retry]').forEach(b => b.addEventListener('click', async () => {
-      b.disabled = true;
-      try { await api('/api/add-requests/' + encodeURIComponent(b.dataset.retry), { method:'POST', body:JSON.stringify({ status:'retry' }) }); }
-      catch (_) { announce('Still could not send. Your request is saved.'); }
+    // Only requests that need the owner, or are visibly on their way, earn a card. Finished ones show up as the movie itself.
+    const visible = recent.map(requestCardModel).filter(Boolean).slice(0, 5);
+    progress.innerHTML = visible.map(renderRequestCard).join('');
+    progress.querySelectorAll('[data-request-action]').forEach(b => b.addEventListener('click', async () => {
+      const { requestId, requestAction, answer } = b.dataset;
+      b.closest('.request-card')?.querySelectorAll('button').forEach(x => { x.disabled = true; });
+      const body = requestAction === 'answer' ? { status:'answer', answer } : { status:requestAction };
+      try {
+        await api('/api/add-requests/' + encodeURIComponent(requestId), { method:'POST', body:JSON.stringify(body) });
+        if (requestAction === 'answer') announce(`Got it: ${answer}. Adding it now.`);
+      } catch (_) { announce('Could not send that right now. Your request is saved.'); }
       finally { await refreshRequests(); }
     }));
     const signature = JSON.stringify(recent.map(r => [r.id,r.status,r.updated_at]));
@@ -84,6 +89,26 @@ async function refreshRequests() {
   requestTimer = setTimeout(refreshRequests, document.hidden ? 30000 : 5000);
 }
 
+const STALE_REQUEST_MS = 6 * 3600 * 1000;
+function requestCardModel(r) {
+  const age = Date.now() - Date.parse(r.updated_at || r.created_at || 0);
+  const stalled = ['queued','dispatched','processing'].includes(r.status) && age > STALE_REQUEST_MS;
+  if (stalled) return { r, tone:'warn', line:'Didn’t finish', actions:[['retry','Try again'],['dismiss','Dismiss']] };
+  if (r.status === 'blocked') {
+    const choices = Array.isArray(r.choices) ? r.choices.filter(Boolean) : [];
+    return { r, tone:'ask', line: r.status_detail || 'Which one did you mean?', choices, actions:[['dismiss','Skip']] };
+  }
+  if (r.status === 'failed') return { r, tone:'warn', line: r.status_detail || 'Couldn’t add this.', actions:[['retry','Try again'],['dismiss','Dismiss']] };
+  if (['not_sent','dispatch_failed'].includes(r.status)) return { r, tone:'warn', line:'Saved, not sent yet', actions:[['retry','Send'],['dismiss','Dismiss']] };
+  if (['queued','dispatched','processing'].includes(r.status)) return { r, tone:'busy', line:'Finding it…', actions:[] };
+  return null; // completed, dismissed, unknown: nothing to act on
+}
+function renderRequestCard({ r, tone, line, choices = [], actions }) {
+  const id = escapeHtml(r.id);
+  const choiceButtons = choices.map(c => `<button type="button" class="request-choice" data-request-id="${id}" data-request-action="answer" data-answer="${escapeHtml(c)}">${escapeHtml(c)}</button>`).join('');
+  const actionButtons = actions.map(([action, label]) => `<button type="button" class="request-action${action === 'dismiss' ? ' quiet' : ''}" data-request-id="${id}" data-request-action="${action}">${escapeHtml(label)}</button>`).join('');
+  return `<div class="request-card ${tone}"><div class="request-head"><b>${escapeHtml(r.text)}</b>${tone === 'busy' ? '<span class="request-spinner" aria-hidden="true"></span>' : ''}</div><p>${escapeHtml(line)}</p>${choiceButtons ? `<div class="request-choices">${choiceButtons}</div>` : ''}${actionButtons ? `<div class="request-actions">${actionButtons}</div>` : ''}</div>`;
+}
 
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));

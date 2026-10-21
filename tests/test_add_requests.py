@@ -216,3 +216,56 @@ def test_dispatch_ack_does_not_clobber_fast_worker_completion(tmp_path: Path):
     assert record["status"] == "completed"
     assert record["dispatch_response"] == {"status": "accepted"}
     assert load_add_requests(log_path)[0]["status"] == "completed"
+
+
+def test_blocked_request_keeps_tappable_choices_and_answer_redispatches(tmp_path: Path):
+    log_path = tmp_path / "add_requests.json"
+    record = queue_add_request("Metropolis", request_log_path=log_path)
+    blocked = update_add_request(
+        record["id"], "blocked", detail="Which Metropolis?",
+        choices=["Metropolis (1927) · Fritz Lang", "Metropolis (2001) · Rintaro", "", "Metropolis (1927) · Fritz Lang"],
+        request_log_path=log_path,
+    )
+    assert blocked["choices"] == ["Metropolis (1927) · Fritz Lang", "Metropolis (2001) · Rintaro"]
+
+    seen = []
+    answered = server.answer_add_request(
+        record["id"], "Metropolis (1927) · Fritz Lang",
+        request_log_path=log_path, dispatcher=lambda item: seen.append(item) or {"status": "accepted"},
+    )
+    assert answered["status"] == "dispatched"
+    assert answered["answer"] == "Metropolis (1927) · Fritz Lang"
+    assert answered["choices"] == [] and answered["status_detail"] == ""
+    assert "owner has now chosen: Metropolis (1927) · Fritz Lang" in seen[0]["prompt"]
+    assert "Which Metropolis?" in seen[0]["prompt"]
+
+
+def test_answer_requires_text_and_ignores_unblocked_requests(tmp_path: Path):
+    log_path = tmp_path / "add_requests.json"
+    record = queue_add_request("Stalker", request_log_path=log_path)
+    try:
+        server.answer_add_request(record["id"], "  ", request_log_path=log_path, dispatcher=lambda _i: {})
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("empty answer must fail")
+    unchanged = server.answer_add_request(record["id"], "Stalker (1979)", request_log_path=log_path, dispatcher=lambda _i: 1 / 0)
+    assert unchanged["status"] == "queued"
+
+
+def test_dismiss_and_stalled_retry(tmp_path: Path):
+    log_path = tmp_path / "add_requests.json"
+    record = queue_add_request("The Return (2024)", request_log_path=log_path)
+    assert not server.request_is_stalled(record)
+    items = load_add_requests(log_path)
+    items[0]["updated_at"] = "2026-07-30T12:44:57+00:00"
+    server.save_add_requests(items, log_path)
+    assert server.request_is_stalled(load_add_requests(log_path)[0])
+    retried = retry_add_request(record["id"], request_log_path=log_path, dispatcher=lambda _i: {"status": "accepted"})
+    assert retried["status"] == "dispatched"
+    assert server.dismiss_add_request(record["id"], request_log_path=log_path)["status"] == "dismissed"
+
+
+def test_add_request_prompt_asks_for_short_question_and_choices():
+    prompt = build_cinequeue_add_prompt("Metropolis")
+    assert "`choices`" in prompt and "no URLs" in prompt
