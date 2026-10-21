@@ -6,7 +6,7 @@ type: service
 category: app
 version: 0.2.1
 summary: Private movie and series watch queue with watch history, notes, documented API and MCP.
-license: LicenseRef-Proprietary
+license: MIT
 source: .
 icon: web/icon-512.png
 runtime:
