@@ -97,10 +97,10 @@ def test_real_mobile_touch_swipe():
     original_order = [movie["id"] for movie in original]
     wrapper = tmp / "serve.py"
     wrapper.write_text(
-        "import sys\n"
+        "import sys\nfrom pathlib import Path\n"
         f"sys.path.insert(0, {str(ROOT)!r})\n"
         "import cinequeue.server as s\n"
-        f"s.DATA = {str(data)!r}\n"
+        f"s.DATA = Path({str(data)!r})\n"
         f"s.run(port={PORT})\n"
     )
     server = subprocess.Popen(
