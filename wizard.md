@@ -4,6 +4,7 @@ id: cinequeue
 name: Movies
 type: service
 category: app
+voice_names: ["cine queue", "cinequeue", "movies"]
 version: 0.2.1
 summary: Private movie and series watch queue with watch history, notes, documented API and MCP.
 license: MIT
