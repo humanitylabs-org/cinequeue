@@ -5,6 +5,16 @@ swipe a row to mark it watched or archive it, keep a dated watch history and que
 Installable as a PWA. Packaged as a Wizard OS managed app (`wizard.md`, Runtipi recipe, `/api`,
 `/mcp`, `/healthz`, view at `/`).
 
+## Managed packaging
+
+`runtime.package: source` runs the stdlib app on the official Python multi-architecture
+image pinned by index digest, with `${APP_SOURCE_DIR}:/app:ro`. No image build or GHCR
+publication is needed. The existing entrypoint still prepares root-owned app-data and drops
+to UID/GID 1000; the read-only filesystem and capability restrictions are unchanged.
+The compose carries the Dockerfile's environment, working directory, command and healthcheck.
+The App Manager must supply `APP_SOURCE_DIR` (wizard-app-manager#153); do not merge this
+recipe until that support ships in a Wizard release. The Dockerfile remains a development option.
+
 ## Run locally
 
 ```bash

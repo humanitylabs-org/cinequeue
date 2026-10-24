@@ -11,6 +11,7 @@ license: MIT
 source: .
 icon: web/icon-512.png
 runtime:
+  package: source
   kind: runtipi
   config: runtipi/config.json
   compose: runtipi/docker-compose.yml
