@@ -1419,6 +1419,17 @@ sortEl.addEventListener('change', () => {
 if (addOpen) addOpen.addEventListener('click', openAddRequestPanel);
 if (addRequestClose) addRequestClose.addEventListener('click', closeAddRequestPanel);
 if (addRequestBackdrop) addRequestBackdrop.addEventListener('click', closeAddRequestPanel);
+// Drag the sheet's header down to close it (design rules v0: ×, Esc, outside tap, Back and swipe-down).
+const addRequestHead = addRequestPanel?.querySelector('.add-request-head');
+let addRequestDragY = null;
+if (addRequestHead) {
+  addRequestHead.addEventListener('touchstart', (event) => { addRequestDragY = event.touches[0].clientY; }, { passive: true });
+  addRequestHead.addEventListener('touchend', (event) => {
+    if (addRequestDragY != null && event.changedTouches[0].clientY - addRequestDragY > 60) closeAddRequestPanel();
+    addRequestDragY = null;
+  }, { passive: true });
+  addRequestHead.addEventListener('touchcancel', () => { addRequestDragY = null; }, { passive: true });
+}
 if (addRequestForm) addRequestForm.addEventListener('submit', submitAddRequest);
 if (addRequestInput) addRequestInput.addEventListener('keydown', (event) => {
   if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') submitAddRequest(event);

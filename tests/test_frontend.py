@@ -301,3 +301,10 @@ def test_request_cards_only_show_actionable_states():
     assert "Added and verified" not in APP
     assert 'data-request-action="answer"' in APP
     assert ".request-choice" in skin
+
+
+def test_design_rules_fill_window_and_sheet_swipe_close():
+    # Design rules v0: the app frame has no width cap, and the add sheet also closes on a swipe down.
+    import re
+    assert not re.search(r"\.wrap\s*\{[^}]*max-width", CSS)
+    assert "addRequestHead.addEventListener('touchend'" in APP
