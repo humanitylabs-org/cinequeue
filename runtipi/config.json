@@ -1,7 +1,7 @@
 {
   "id": "cinequeue",
   "name": "Movies",
-  "wizard_type": "service",
+  "wizard_type": "view",
   "available": true,
   "short_desc": "Private movie and series watch queue.",
   "description": "Private test release: starts with Batman Begins (2005). Your queue, history and notes stay in the app data folder.",
@@ -10,8 +10,8 @@
   "categories": [
     "media"
   ],
-  "tipi_version": 1,
-  "version": "0.2.1",
+  "tipi_version": 2,
+  "version": "0.2.2",
   "source": "https://github.com/humanitylabs-org/cinequeue",
   "exposable": false,
   "supported_architectures": [

@@ -31,7 +31,9 @@ CINEQUEUE_DATA=./data CINEQUEUE_BASE_PATH= python3 -m cinequeue   # http://127.0
 | `CINEQUEUE_ADMIT` | `disabled` | `live` hands "find and add" requests to the Wizard Agent Service; `stub`/`fail` are QA fakes. |
 | `CINEQUEUE_WIZARD_ORIGIN` | empty | Agent Service origin, required for `live`. |
 | `CINEQUEUE_AGENT_NAME` | `your Wizard` | Name shown on the request sheet when live. |
-| `CINEQUEUE_ORIGINS` | empty | Extra exact browser origins allowed to write. |
+| `WIZARD_TRUSTED_HOSTS` | empty | Exact hosts accepted from the Wizard gateway; filled by Wizard during install. |
+| `WIZARD_TRUSTED_ORIGINS` | empty | Exact browser origins accepted from the Wizard gateway; filled by Wizard during install. |
+| `CINEQUEUE_ORIGINS` | empty | Legacy extra exact browser origins; kept for existing installs. |
 | `CINEQUEUE_BASE_PATH` | `/cinequeue` (empty in the image) | Path prefix when not behind a prefix-stripping proxy. |
 
 No third-party API keys are needed. Without agent admission the add sheet adds simple cards

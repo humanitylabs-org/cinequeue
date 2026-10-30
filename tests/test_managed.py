@@ -152,6 +152,26 @@ def test_dns_rebinding_hosts_are_refused_for_reads_and_writes(app, monkeypatch):
     assert status == 200
 
 
+def test_standard_wizard_trust_environment_is_accepted(monkeypatch):
+    monkeypatch.setenv("CINEQUEUE_ORIGINS", "https://legacy.example")
+    monkeypatch.setenv("WIZARD_TRUSTED_ORIGINS", "https://wizard.example.ts.net:8796")
+    monkeypatch.setenv("WIZARD_TRUSTED_HOSTS", "wizard.example.ts.net:8796,wizard.example.ts.net")
+    origins, hosts = server.configured_trust()
+    assert origins == {"https://legacy.example", "https://wizard.example.ts.net:8796"}
+    assert hosts == {"legacy.example", "wizard.example.ts.net", "wizard.example.ts.net:8796"}
+
+
+def test_movies_is_packaged_as_an_owner_facing_app():
+    root = Path(__file__).resolve().parents[1]
+    manifest = (root / "wizard.md").read_text()
+    config = json.loads((root / "runtipi" / "config.json").read_text())
+    compose = (root / "runtipi" / "docker-compose.yml").read_text()
+    assert "\ntype: view\n" in manifest
+    assert config["wizard_type"] == "view"
+    assert "WIZARD_TRUSTED_HOSTS" in compose
+    assert "WIZARD_TRUSTED_ORIGINS" in compose
+
+
 def test_store_writes_hold_an_advisory_lock_file(app):
     base, data = app
     post(f"{base}/api/add", {"text": "Heat"})

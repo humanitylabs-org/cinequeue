@@ -113,7 +113,7 @@ async function flow(browser, base, tag, apiBase) {
   assert.ok(page.url().startsWith(base.href), page.url());
   assert.equal(await page.locator('.topbar').count(), 1);
   await shot('05-back-floor');
-  checks.push('root Back shows "Press back again to exit" and stays');
+  checks.push('Back at the app start shows the shared stay-open hint');
   await page.waitForTimeout(2200);
 
   // Mark watched from detail, see history, then watch again.
@@ -172,8 +172,8 @@ async function flow(browser, base, tag, apiBase) {
   const manifest = await (await page.request.get(new URL('manifest.json', base).href)).json();
   assert.equal(manifest.start_url, './');
   assert.equal(manifest.display, 'standalone');
-  assert.equal(await page.locator('script[src^="pwa-install.js"]').count(), 1);
-  checks.push('reload persists; PWA manifest relative start_url, install script present');
+  assert.equal(await page.locator('script[src^="pwa-install.js"]').count(), 0);
+  checks.push('reload persists; PWA manifest stays relative and Wizard owns installation');
 
   await page.setViewportSize({ width: 1280, height: 900 });
   await shot('09-desktop');

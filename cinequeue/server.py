@@ -20,7 +20,7 @@ from urllib.parse import parse_qs, unquote, urlparse, urlsplit
 from cinequeue.core import MovieStore, WatchStateConflict, parse_movie_requests
 from cinequeue.watch_providers import WatchProviderError, WatchProviderService, configured_region, region_name
 
-VERSION = "0.2.1"
+VERSION = "0.2.2"
 ROOT = Path(__file__).resolve().parents[1]
 STATIC = ROOT / "web"
 # Owner state lives in one writable directory: the packaged app mounts ${APP_DATA_DIR}/data at /data.
@@ -36,8 +36,26 @@ WATCH_PROVIDERS = WatchProviderService()
 ADMIT = os.environ.get("CINEQUEUE_ADMIT", "disabled").strip().lower()
 WIZARD_ORIGIN = os.environ.get("CINEQUEUE_WIZARD_ORIGIN", "").strip().rstrip("/")
 AGENT_NAME = os.environ.get("CINEQUEUE_AGENT_NAME", "").strip()[:40] or "your Wizard"
-ORIGINS = {o.strip().rstrip("/") for o in os.environ.get("CINEQUEUE_ORIGINS", "").split(",") if o.strip()}
-ORIGIN_HOSTS = {urlsplit(o).netloc for o in ORIGINS}
+
+
+def configured_trust() -> tuple[set[str], set[str]]:
+    """Read both the legacy Movies setting and Wizard's standard gateway trust settings."""
+    origins = {
+        value.strip().rstrip("/")
+        for name in ("CINEQUEUE_ORIGINS", "WIZARD_TRUSTED_ORIGINS")
+        for value in os.environ.get(name, "").split(",")
+        if value.strip()
+    }
+    hosts = {
+        value.strip()
+        for value in os.environ.get("WIZARD_TRUSTED_HOSTS", "").split(",")
+        if value.strip()
+    }
+    hosts.update(filter(None, (urlsplit(origin).netloc for origin in origins)))
+    return origins, hosts
+
+
+ORIGINS, ORIGIN_HOSTS = configured_trust()
 REQUEST_STATUSES = ("queued", "dispatched", "processing", "completed", "blocked", "failed")
 # A request still "in flight" this long after its last update is treated as stalled and offered a retry.
 STALE_REQUEST_SECONDS = 6 * 3600
