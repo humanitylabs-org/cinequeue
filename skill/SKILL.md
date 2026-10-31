@@ -5,6 +5,9 @@ description: Use when reading or changing the owner's Movies watch queue.
 # Movies agent skill
 
 Use this app's `/mcp` JSON-RPC endpoint (or the documented `/api`), never files in its container.
+For exact-title/year resolution, enrichment, request lifecycle and safe maintenance, follow
+[`docs/AGENT-CARD-WORKFLOW.md`](../docs/AGENT-CARD-WORKFLOW.md). The app id is `movies`;
+`cinequeue_*` method names remain compatibility contracts, not app IDs.
 - `cinequeue_list`: queue in order (`view` queue|watched|archived|all, optional `search`, `limit`).
 - `cinequeue_get`: one card with queue position and watch history.
 - `cinequeue_add`: `text` ("Stalker 1979, Heat") or `title`+`year`; new titles go to the top.
