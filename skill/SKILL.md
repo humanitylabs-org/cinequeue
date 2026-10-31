@@ -1,5 +1,5 @@
 ---
-name: cinequeue
+name: movies
 description: Use when reading or changing the owner's Movies watch queue.
 ---
 # Movies agent skill

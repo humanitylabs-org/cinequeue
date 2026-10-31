@@ -1,5 +1,5 @@
 {
-  "id": "cinequeue",
+  "id": "movies",
   "name": "Movies",
   "wizard_type": "view",
   "available": true,
@@ -11,8 +11,8 @@
     "media"
   ],
   "tipi_version": 2,
-  "version": "0.2.2",
-  "source": "https://github.com/humanitylabs-org/cinequeue",
+  "version": "0.3.0",
+  "source": "https://github.com/humanitylabs-org/movies",
   "exposable": false,
   "supported_architectures": [
     "arm64",
