@@ -42,8 +42,9 @@ directly; enriched metadata (poster, IMDb rating, cast…) is filled in by an ag
 
 ## Oscar / second Wizard setup
 
-The stable internal app ID and MCP prefix remain `cinequeue` so updates retain existing data;
-all display labels are Movies. Open the managed view through Wizard, where the central
+The app id is `movies`, the app's name (it was `cinequeue` until 0.3.0; wizard.md `renamed_from: [cinequeue]`
+lets the App Manager move an existing install, data and connections included, to the new id). The MCP tool prefix
+and `CINEQUEUE_*` settings keep their names so agents and saved settings keep working. All display labels are Movies. Open the managed view through Wizard, where the central
 `/wizard-os-home/core/app-client.js` resource is served. Do not copy platform code into the app.
 For direct-port standalone use set `CINEQUEUE_SHARED_ORIGIN` to the reachable Wizard origin;
 the app proxies only that one centrally maintained script. This defaults to the agent origin.
